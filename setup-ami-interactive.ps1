@@ -78,9 +78,15 @@ function Test-BaseAMIPrerequisites {
     }
     
     # Check Python
-    $pythonPath = (Get-Command python -ErrorAction SilentlyContinue).Source
+    $pythonPaths = @(
+        "C:\Python314\python.exe",
+        "C:\Python313\python.exe",
+        "C:\Python312\python.exe",
+        "C:\Python311\python.exe"
+    )
+    $pythonPath = $pythonPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $pythonPath) {
-        $missingItems += "Python not found in PATH"
+        $missingItems += "Python not installed (checked Python 3.11-3.14)"
     }
     
     # Check TightVNC
