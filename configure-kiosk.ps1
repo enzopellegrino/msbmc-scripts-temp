@@ -82,7 +82,8 @@ if ($Enable) {
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 1 -Force
     
     # Apply registry changes without killing explorer
-    $code = @"
+    if (-not ([System.Management.Automation.PSTypeName]'Shell').Type) {
+        $code = @"
 using System;
 using System.Runtime.InteropServices;
 public class Shell {
@@ -102,16 +103,30 @@ public class Taskbar {
     }
 }
 "@
-    
-    if (-not ([System.Management.Automation.PSTypeName]'Shell').Type) {
         Add-Type -TypeDefinition $code
     }
     
     # Refresh shell to apply icon hide
     [Shell]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+    
+    # PERSISTENT taskbar auto-hide via registry
+    $taskbarRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
+    if (Test-Path $taskbarRegPath) {
+        $settings = Get-ItemProperty -Path $taskbarRegPath -Name "Settings" -ErrorAction SilentlyContinue
+        if ($settings) {
+            $bytes = $settings.Settings
+            # Byte 8: 0x03 = auto-hide enabled (0x02 causes issues on some systems)
+            $bytes[8] = 0x03
+            Set-ItemProperty -Path $taskbarRegPath -Name "Settings" -Value $bytes -Force
+        }
+    }
+    
+    # Also mark taskbar as small icons (takes less space if it appears)
+    Set-ItemProperty -Path $desktopRegPath -Name "TaskbarSmallIcons" -Value 1 -Force -ErrorAction SilentlyContinue
+    
     Start-Sleep -Seconds 1
     
-    # Hide taskbar
+    # Hide taskbar immediately via API (temporary until reboot, then registry takes over)
     [Taskbar]::Hide()
     
     # Disable Windows key to prevent Start menu access
@@ -121,11 +136,7 @@ public class Taskbar {
     }
     Set-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Value 1 -Force
     
-    # Kill and restart explorer to apply policy immediately
-    Stop-Process -Name "explorer" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
-    
-    Write-Host "   [OK] Windows key disabled (explorer restarted)" -ForegroundColor Green
+    Write-Host "   [OK] Windows key disabled + taskbar set to auto-hide" -ForegroundColor Green
     
     # Start Chrome WITHOUT maximize (we'll position it manually to cover full screen)
     Write-Host "[INFO] Starting Chrome with profile: $ChromeProfileDir" -ForegroundColor Cyan
@@ -196,11 +207,19 @@ public class WindowStyle {
         Remove-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Force -ErrorAction SilentlyContinue
     }
     
-    # Restart explorer to apply
-    Stop-Process -Name "explorer" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
+    # Disable taskbar auto-hide
+    $taskbarRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
+    if (Test-Path $taskbarRegPath) {
+        $settings = Get-ItemProperty -Path $taskbarRegPath -Name "Settings" -ErrorAction SilentlyContinue
+        if ($settings) {
+            $bytes = $settings.Settings
+            # Byte 8: 0x02 = always visible
+            $bytes[8] = 0x02
+            Set-ItemProperty -Path $taskbarRegPath -Name "Settings" -Value $bytes -Force
+        }
+    }
     
-    Write-Host "   [OK] Windows key re-enabled" -ForegroundColor Green
+    Write-Host "   [OK] Windows key re-enabled + taskbar restored" -ForegroundColor Green
     
     # Disable Chrome Watchdog
     Disable-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue | Out-Null
