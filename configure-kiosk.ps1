@@ -389,17 +389,14 @@ Write-Host "[4/4] Creating Chrome-only mode restore task..." -ForegroundColor Ye
 
 $restoreScriptPath = "C:\ProgramData\msbmc-restore-chrome-only.ps1"
 $restoreScriptContent = @'
-# This script runs at logon to restore Chrome-only mode if it was active before reboot
+# This script runs at logon to ALWAYS restore Chrome-only mode
+# Even if operator exited before reboot, we return to Chrome-only mode
 
 Start-Sleep -Seconds 8  # Wait for desktop, watchdog, and other services to stabilize
 
-$flagPath = "C:\ProgramData\msbmc-chrome-only.flag"
-
-if (Test-Path $flagPath) {
-    # Chrome-only mode was active - restore it
-    # The toggle script will check if Chrome is already running before starting
-    & "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Enable
-}
+# ALWAYS enable Chrome-only mode at boot
+# Operator can temporarily exit with ESC 3x + password, but reboot resets to Chrome-only
+& "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Enable
 '@
 $restoreScriptContent | Set-Content -Path $restoreScriptPath -Encoding UTF8 -Force
 
