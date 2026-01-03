@@ -262,26 +262,27 @@ if (-not (Test-Path $flagFile)) {
 [KioskGuard]::StartHook()
 Write-Log "Keyboard hook installed"
 
-# Initial setup - force chrome-only mode
-Write-Log "Applying initial chrome-only lockdown..."
-[KioskGuard]::SetBlockWinKey($true)
-[KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
-[KioskGuard]::HideTaskbar()
-Start-Sleep -Seconds 1
-[KioskGuard]::HideTaskbar()  # Double-tap to ensure hidden
-
-# Start Chrome if not running
+# Start Chrome FIRST (before applying restrictions)
 if (-not (Get-Process chrome -ErrorAction SilentlyContinue)) {
     Write-Log "Starting Chrome..."
     Start-Chrome
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 5
 }
+
+# Now apply lockdown
+Write-Log "Applying chrome-only lockdown..."
+[KioskGuard]::SetBlockWinKey($true)
+[KioskGuard]::HideTaskbar()
+Start-Sleep -Seconds 1
+[KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
 
 # Make Chrome fullscreen
 $hwnd = Get-ChromeWindow
 if ($hwnd -ne [IntPtr]::Zero) {
     Write-Log "Making Chrome fullscreen..."
     [KioskGuard]::MakeChromeFullscreen($hwnd, $screenWidth, $screenHeight)
+} else {
+    Write-Log "WARNING: Chrome window not found"
 }
 
 $lastMode = $true  # Start in chrome-only mode
