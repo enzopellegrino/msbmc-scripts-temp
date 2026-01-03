@@ -60,6 +60,18 @@ public class ShellNotify {
 }
 "@
 
+# Get msbmc user SID for registry operations (works even when running elevated)
+function Get-MsbmcRegPath {
+    try {
+        $msbmcUser = Get-LocalUser -Name "msbmc" -ErrorAction Stop
+        $msbmcSID = $msbmcUser.SID.Value
+        return "Registry::HKEY_USERS\$msbmcSID\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    } catch {
+        # Fallback to HKCU if not elevated or user not found
+        return "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    }
+}
+
 if ($Enable) {
     Write-Host "[CHROME-ONLY] Enabling Chrome-only mode..." -ForegroundColor Green
     
@@ -73,14 +85,14 @@ if ($Enable) {
     Set-Content -Path $flagFile -Value "enabled"
     Write-Host "   [OK] Flag file created" -ForegroundColor Green
     
-    # Hide desktop icons
-    $desktopRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    # Hide desktop icons for msbmc user
+    $desktopRegPath = Get-MsbmcRegPath
     if (-not (Test-Path $desktopRegPath)) {
         New-Item -Path $desktopRegPath -Force | Out-Null
     }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 1 -Force
     [ShellNotify]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
-    Write-Host "   [OK] Desktop icons hidden" -ForegroundColor Green
+    Write-Host "   [OK] Desktop icons hidden (reg: $desktopRegPath)" -ForegroundColor Green
     
     # Start Chrome if not running (KioskGuard will position it)
     $existing = Get-Process chrome -ErrorAction SilentlyContinue
@@ -99,11 +111,11 @@ if ($Enable) {
     Remove-Item -Path $flagFile -Force -ErrorAction SilentlyContinue
     Write-Host "   [OK] Flag file removed" -ForegroundColor Green
     
-    # Show desktop icons
-    $desktopRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    # Show desktop icons for msbmc user
+    $desktopRegPath = Get-MsbmcRegPath
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 0 -Force
     [ShellNotify]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
-    Write-Host "   [OK] Desktop icons shown" -ForegroundColor Green
+    Write-Host "   [OK] Desktop icons shown (reg: $desktopRegPath)" -ForegroundColor Green
     
     Write-Host "[CHROME-ONLY] Maintenance mode - KioskGuard will restore taskbar" -ForegroundColor Cyan
     
