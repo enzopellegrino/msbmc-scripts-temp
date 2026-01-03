@@ -61,9 +61,6 @@ if ($Enable) {
     
     Write-Host "[INFO] Using Chrome profile: $ChromeProfileDir" -ForegroundColor Cyan
     
-    # NON cambiamo la shell - explorer rimane attivo per gestire processi di sistema
-    # Invece nascondiamo taskbar + desktop icons + forziamo Chrome sempre in primo piano
-    
     # Create flag file
     Set-Content -Path "C:\ProgramData\msbmc-chrome-only.flag" -Value "enabled"
     
@@ -81,24 +78,93 @@ if ($Enable) {
     }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 1 -Force
     
-    # Apply registry changes without killing explorer
-    if (-not ([System.Management.Automation.PSTypeName]'Shell').Type) {
+    # Load Windows API types
+    if (-not ([System.Management.Automation.PSTypeName]'KioskHelper').Type) {
         $code = @"
 using System;
 using System.Runtime.InteropServices;
-public class Shell {
+
+public class KioskHelper {
     [DllImport("shell32.dll")]
     public static extern void SHChangeNotify(int eventId, int flags, IntPtr item1, IntPtr item2);
-}
-public class Taskbar {
+    
     [DllImport("user32.dll")]
     public static extern IntPtr FindWindow(string className, string windowName);
+    
+    [DllImport("user32.dll")]
+    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+    
     [DllImport("user32.dll")]
     public static extern int ShowWindow(IntPtr hwnd, int command);
-    public static void Hide() {
+    
+    [DllImport("user32.dll")]
+    public static extern bool EnableWindow(IntPtr hwnd, bool enable);
+    
+    [DllImport("user32.dll")]
+    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    
+    [DllImport("user32.dll")]
+    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    
+    [DllImport("user32.dll")]
+    public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+    
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    
+    public const int SW_HIDE = 0;
+    public const int SW_SHOW = 5;
+    public const int GWL_STYLE = -16;
+    public const int GWL_EXSTYLE = -20;
+    public const int WS_CAPTION = 0x00C00000;
+    public const int WS_THICKFRAME = 0x00040000;
+    public const int WS_EX_APPWINDOW = 0x00040000;
+    public const int WS_EX_TOOLWINDOW = 0x00000080;
+    
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+    public const uint SWP_FRAMECHANGED = 0x0020;
+    
+    public static void HideTaskbar() {
+        // Hide main taskbar
         IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
         if (hwnd != IntPtr.Zero) {
-            ShowWindow(hwnd, 0);  // SW_HIDE
+            ShowWindow(hwnd, SW_HIDE);
+            EnableWindow(hwnd, false);  // Disable clicks
+        }
+        // Hide secondary taskbar (multi-monitor)
+        IntPtr hwnd2 = FindWindow("Shell_SecondaryTrayWnd", null);
+        if (hwnd2 != IntPtr.Zero) {
+            ShowWindow(hwnd2, SW_HIDE);
+            EnableWindow(hwnd2, false);
+        }
+        // Hide Start button separately
+        IntPtr startBtn = FindWindow("Button", "Start");
+        if (startBtn != IntPtr.Zero) {
+            ShowWindow(startBtn, SW_HIDE);
+        }
+    }
+    
+    public static void ShowTaskbar() {
+        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
+        if (hwnd != IntPtr.Zero) {
+            EnableWindow(hwnd, true);
+            ShowWindow(hwnd, SW_SHOW);
+        }
+        IntPtr hwnd2 = FindWindow("Shell_SecondaryTrayWnd", null);
+        if (hwnd2 != IntPtr.Zero) {
+            EnableWindow(hwnd2, true);
+            ShowWindow(hwnd2, SW_SHOW);
+        }
+        IntPtr startBtn = FindWindow("Button", "Start");
+        if (startBtn != IntPtr.Zero) {
+            ShowWindow(startBtn, SW_SHOW);
         }
     }
 }
@@ -107,20 +173,27 @@ public class Taskbar {
     }
     
     # Refresh shell to apply icon hide
-    [Shell]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+    [KioskHelper]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
     
-    # Hide taskbar immediately via API (solo per la sessione corrente)
+    # HIDE AND DISABLE taskbar completely
     Start-Sleep -Seconds 1
-    [Taskbar]::Hide()
+    [KioskHelper]::HideTaskbar()
     
-    # Disable Windows key to prevent Start menu access
+    # Disable Windows key via Scancode Map (requires logoff but we also use policy)
     $explorerPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
     if (-not (Test-Path $explorerPolicyPath)) {
         New-Item -Path $explorerPolicyPath -Force | Out-Null
     }
     Set-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Value 1 -Force
     
-    Write-Host "   [OK] Windows key disabled + taskbar set to auto-hide" -ForegroundColor Green
+    # Also set system-wide policy (more reliable)
+    $systemPolicyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+    if (-not (Test-Path $systemPolicyPath)) {
+        New-Item -Path $systemPolicyPath -Force | Out-Null
+    }
+    Set-ItemProperty -Path $systemPolicyPath -Name "NoWinKeys" -Value 1 -Force -ErrorAction SilentlyContinue
+    
+    Write-Host "   [OK] Taskbar hidden + disabled, Windows key blocked" -ForegroundColor Green
     
     # Start Chrome WITHOUT maximize (we'll position it manually to cover full screen)
     Write-Host "[INFO] Starting Chrome with profile: $ChromeProfileDir" -ForegroundColor Cyan
@@ -201,10 +274,14 @@ public class WindowStyle {
 } elseif ($Disable) {
     Write-Host "[CHROME-ONLY] Disabling Chrome-only mode..." -ForegroundColor Yellow
     
-    # Re-enable Windows key
+    # Re-enable Windows key (both user and system)
     $explorerPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
     if (Test-Path $explorerPolicyPath) {
         Remove-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Force -ErrorAction SilentlyContinue
+    }
+    $systemPolicyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+    if (Test-Path $systemPolicyPath) {
+        Remove-ItemProperty -Path $systemPolicyPath -Name "NoWinKeys" -Force -ErrorAction SilentlyContinue
     }
     
     Write-Host "   [OK] Windows key re-enabled" -ForegroundColor Green
@@ -223,8 +300,13 @@ public class WindowStyle {
     }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 0 -Force
     
-    # Show taskbar
-    $code = @"
+    # Show taskbar using KioskHelper (already loaded)
+    if ([System.Management.Automation.PSTypeName]'KioskHelper'.Type) {
+        [KioskHelper]::ShowTaskbar()
+        [KioskHelper]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+    } else {
+        # Fallback if KioskHelper not loaded
+        $code = @"
 using System;
 using System.Runtime.InteropServices;
 public class TaskbarShow {
@@ -232,10 +314,13 @@ public class TaskbarShow {
     public static extern IntPtr FindWindow(string className, string windowName);
     [DllImport("user32.dll")]
     public static extern int ShowWindow(IntPtr hwnd, int command);
+    [DllImport("user32.dll")]
+    public static extern bool EnableWindow(IntPtr hwnd, bool enable);
     public static void Show() {
         IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
         if (hwnd != IntPtr.Zero) {
-            ShowWindow(hwnd, 1);  // SW_SHOWNORMAL
+            EnableWindow(hwnd, true);
+            ShowWindow(hwnd, 5);  // SW_SHOW
         }
     }
 }
@@ -245,14 +330,15 @@ public class ShellRefresh {
 }
 "@
     
-    if (-not ([System.Management.Automation.PSTypeName]'TaskbarShow').Type) {
-        Add-Type -TypeDefinition $code
+        if (-not ([System.Management.Automation.PSTypeName]'TaskbarShow').Type) {
+            Add-Type -TypeDefinition $code
+        }
+        
+        [TaskbarShow]::Show()
+        
+        # Refresh shell to show icons
+        [ShellRefresh]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
     }
-    
-    [TaskbarShow]::Show()
-    
-    # Refresh shell to show icons
-    [ShellRefresh]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
     
     # Kill Chrome
     Stop-Process -Name "chrome" -Force -ErrorAction SilentlyContinue

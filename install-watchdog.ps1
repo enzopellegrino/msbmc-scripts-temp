@@ -37,8 +37,32 @@ public class WindowHelper {
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    [DllImport("user32.dll")] public static extern IntPtr FindWindow(string className, string windowName);
+    
     public const int SW_MAXIMIZE = 3;
     public const int SW_RESTORE = 9;
+    public const int SW_HIDE = 0;
+    public const int GWL_STYLE = -16;
+    public const int WS_CAPTION = 0x00C00000;
+    public const int WS_THICKFRAME = 0x00040000;
+    
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+    public const uint SWP_FRAMECHANGED = 0x0020;
+    
+    // Hide taskbar
+    public static void HideTaskbar() {
+        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
+        if (hwnd != IntPtr.Zero) {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+    }
 }
 "@
 
@@ -117,27 +141,36 @@ function Is-ChromeOnlyMode {
     return (Test-Path "C:\ProgramData\msbmc-chrome-only.flag")
 }
 
-# Function to ensure Chrome window is maximized
-function Ensure-ChromeMaximized {
+# Function to ensure Chrome window is borderless, fullscreen, and topmost
+function Ensure-ChromeFullscreen {
     $chromeProcs = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
     
     foreach ($proc in $chromeProcs) {
         $hwnd = $proc.MainWindowHandle
         if ($hwnd -ne 0) {
-            $isMinimized = [WindowHelper]::IsIconic($hwnd)
-            $isMaximized = [WindowHelper]::IsZoomed($hwnd)
+            # Remove window borders (caption + thick frame)
+            $currentStyle = [WindowHelper]::GetWindowLong($hwnd, [WindowHelper]::GWL_STYLE)
+            $newStyle = $currentStyle -band (-bnot [WindowHelper]::WS_CAPTION) -band (-bnot [WindowHelper]::WS_THICKFRAME)
+            [WindowHelper]::SetWindowLong($hwnd, [WindowHelper]::GWL_STYLE, $newStyle) | Out-Null
             
-            if ($isMinimized -or (-not $isMaximized)) {
-                # Restore if minimized, then maximize
-                if ($isMinimized) {
-                    [WindowHelper]::ShowWindow($hwnd, [WindowHelper]::SW_RESTORE) | Out-Null
-                    Start-Sleep -Milliseconds 200
-                }
-                [WindowHelper]::ShowWindow($hwnd, [WindowHelper]::SW_MAXIMIZE) | Out-Null
-                [WindowHelper]::SetForegroundWindow($hwnd) | Out-Null
-            }
+            # Move to exact fullscreen position
+            [WindowHelper]::MoveWindow($hwnd, 0, 0, 1920, 1080, $true) | Out-Null
+            
+            # Set as topmost (always on top)
+            [WindowHelper]::SetWindowPos(
+                $hwnd,
+                [WindowHelper]::HWND_TOPMOST,
+                0, 0, 0, 0,
+                [WindowHelper]::SWP_NOSIZE -bor [WindowHelper]::SWP_NOMOVE -bor [WindowHelper]::SWP_SHOWWINDOW -bor [WindowHelper]::SWP_FRAMECHANGED
+            ) | Out-Null
+            
+            # Bring to foreground
+            [WindowHelper]::SetForegroundWindow($hwnd) | Out-Null
         }
     }
+    
+    # Also ensure taskbar stays hidden
+    [WindowHelper]::HideTaskbar()
 }
 
 # Initial cleanup on first run
@@ -148,14 +181,16 @@ while ($true) {
     $chromeProc = Get-Process chrome -ErrorAction SilentlyContinue
     
     if ($chromeProc) {
-        # Chrome running - ensure it's maximized and in foreground
-        Ensure-ChromeMaximized
+        # Chrome running - ensure it's borderless, fullscreen, and topmost
+        Ensure-ChromeFullscreen
     } else {
         # Chrome NOT running
         # Only restart if Chrome-only mode is active
         if (Is-ChromeOnlyMode) {
             Write-Host "[WATCHDOG] Chrome closed in Chrome-only mode - restarting..." -ForegroundColor Yellow
             Start-ChromeMaximized
+            Start-Sleep -Seconds 3
+            Ensure-ChromeFullscreen
         }
         # In maintenance mode, do nothing - let user work freely
     }
