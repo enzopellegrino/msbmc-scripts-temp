@@ -47,10 +47,19 @@ param(
 )
 
 $ChromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-$ChromeProfileDir = if (Test-Path "D:\ChromeProfile") { "D:\ChromeProfile" } else { "C:\ChromeProfile" }
+$ChromeProfileDir = "D:\ChromeProfile"  # Always use D:\ persistent profile
 
 if ($Enable) {
     Write-Host "[CHROME-ONLY] Enabling Chrome-only mode..." -ForegroundColor Green
+    
+    # Verify profile exists
+    if (-not (Test-Path $ChromeProfileDir)) {
+        Write-Host "[ERROR] Chrome profile not found at $ChromeProfileDir" -ForegroundColor Red
+        Write-Host "Please run setup-ami-interactive.ps1 first to create the profile." -ForegroundColor Yellow
+        return
+    }
+    
+    Write-Host "[INFO] Using Chrome profile: $ChromeProfileDir" -ForegroundColor Cyan
     
     # NON cambiamo la shell - explorer rimane attivo per gestire processi di sistema
     # Invece nascondiamo taskbar + desktop icons + forziamo Chrome sempre in primo piano
