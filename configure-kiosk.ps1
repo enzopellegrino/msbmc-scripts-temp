@@ -351,7 +351,7 @@ Write-Host "   Created: $escMonitorPath" -ForegroundColor Green
 # =============================================================================
 # STEP 3: Create Scheduled Task to run ESC monitor at logon
 # =============================================================================
-Write-Host "[3/3] Creating scheduled task..." -ForegroundColor Yellow
+Write-Host "[3/4] Creating ESC monitor task..." -ForegroundColor Yellow
 
 $taskName = "MSBMC-EscMonitor"
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -374,6 +374,47 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Write-Host "   Created: $taskName (runs at logon)" -ForegroundColor Green
+
+# =============================================================================
+# STEP 4: Create Startup Task to Restore Chrome-Only Mode
+# =============================================================================
+Write-Host "[4/4] Creating Chrome-only mode restore task..." -ForegroundColor Yellow
+
+$restoreScriptPath = "C:\ProgramData\msbmc-restore-chrome-only.ps1"
+$restoreScriptContent = @'
+# This script runs at logon to restore Chrome-only mode if it was active before reboot
+
+Start-Sleep -Seconds 5  # Wait for desktop to stabilize
+
+$flagPath = "C:\ProgramData\msbmc-chrome-only.flag"
+
+if (Test-Path $flagPath) {
+    # Chrome-only mode was active - restore it
+    & "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Enable
+}
+'@
+$restoreScriptContent | Set-Content -Path $restoreScriptPath -Encoding UTF8 -Force
+
+$restoreTaskName = "MSBMC-RestoreChromeOnly"
+$existingRestoreTask = Get-ScheduledTask -TaskName $restoreTaskName -ErrorAction SilentlyContinue
+if ($existingRestoreTask) {
+    Unregister-ScheduledTask -TaskName $restoreTaskName -Confirm:$false
+}
+
+$restoreVbsPath = "C:\ProgramData\msbmc-restore-chrome-only-launcher.vbs"
+$restoreVbsContent = @'
+Set objShell = CreateObject("Wscript.Shell")
+objShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""C:\ProgramData\msbmc-restore-chrome-only.ps1""", 0, False
+'@
+$restoreVbsContent | Set-Content -Path $restoreVbsPath -Encoding ASCII -Force
+
+$restoreAction = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$restoreVbsPath`""
+$restoreTrigger = New-ScheduledTaskTrigger -AtLogOn -User "msbmc"
+$restorePrincipal = New-ScheduledTaskPrincipal -UserId "msbmc" -LogonType Interactive -RunLevel Highest
+$restoreSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
+Register-ScheduledTask -TaskName $restoreTaskName -Action $restoreAction -Trigger $restoreTrigger -Principal $restorePrincipal -Settings $restoreSettings -Force | Out-Null
+Write-Host "   Created: $restoreTaskName (restores Chrome-only mode at boot)" -ForegroundColor Green
 
 # =============================================================================
 # Summary
