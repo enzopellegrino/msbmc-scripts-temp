@@ -1,17 +1,21 @@
 # =============================================================================
-# MSBMC Kiosk Guard - Blocks Windows key and maintains fullscreen Chrome
+# MSBMC Kiosk Guard - Complete kiosk management (SINGLE SCRIPT)
 # =============================================================================
-# This script runs continuously and:
-# 1. Blocks ALL Windows key presses (including virtual from noVNC)
-# 2. Keeps taskbar hidden and disabled
-# 3. Ensures Chrome covers the ENTIRE screen (including taskbar area)
+# This script handles EVERYTHING:
+# 1. Blocks Windows key (low-level keyboard hook) - only in chrome-only mode
+# 2. Hides/shows taskbar based on mode
+# 3. Sets work area to full screen / restores it
+# 4. Keeps Chrome borderless, fullscreen, topmost (chrome-only mode)
+# 5. Restarts Chrome if closed (chrome-only mode)
+# 6. Restores normal behavior in maintenance mode
 # =============================================================================
+
+Add-Type -AssemblyName System.Windows.Forms
 
 Add-Type @"
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 
 public class KioskGuard {
     // Keyboard hook
@@ -46,74 +50,65 @@ public class KioskGuard {
     public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     
     [DllImport("user32.dll")]
-    public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
-    
-    [DllImport("user32.dll")]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
     
-    // Work area modification
+    // Work area
     [DllImport("user32.dll")]
     public static extern bool SystemParametersInfo(int uiAction, int uiParam, ref RECT pvParam, int fWinIni);
     
-    [DllImport("user32.dll")]
-    public static extern bool SystemParametersInfo(int uiAction, int uiParam, IntPtr pvParam, int fWinIni);
-    
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
+        public int Left, Top, Right, Bottom;
     }
     
+    // Constants
     private const int WH_KEYBOARD_LL = 13;
-    private const int WM_KEYDOWN = 0x0100;
-    private const int WM_SYSKEYDOWN = 0x0104;
     private const int VK_LWIN = 0x5B;
     private const int VK_RWIN = 0x5C;
     
     public const int SW_HIDE = 0;
+    public const int SW_SHOW = 5;
     public const int GWL_STYLE = -16;
     public const int WS_CAPTION = 0x00C00000;
     public const int WS_THICKFRAME = 0x00040000;
     
     public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
     public const uint SWP_SHOWWINDOW = 0x0040;
     public const uint SWP_FRAMECHANGED = 0x0020;
     
     public const int SPI_SETWORKAREA = 0x002F;
     public const int SPIF_SENDCHANGE = 0x02;
     
+    // Hook state - can be toggled
     private static IntPtr _hookID = IntPtr.Zero;
     private static LowLevelKeyboardProc _proc = HookCallback;
+    private static bool _blockWinKey = true;
     
     private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
-        if (nCode >= 0) {
+        if (nCode >= 0 && _blockWinKey) {
             int vkCode = Marshal.ReadInt32(lParam);
-            
-            // Block Windows keys
             if (vkCode == VK_LWIN || vkCode == VK_RWIN) {
-                return (IntPtr)1; // Block the key
+                return (IntPtr)1; // Block
             }
         }
         return CallNextHookEx(_hookID, nCode, wParam, lParam);
     }
     
     public static void StartHook() {
-        using (Process curProcess = Process.GetCurrentProcess())
-        using (ProcessModule curModule = curProcess.MainModule) {
-            _hookID = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(curModule.ModuleName), 0);
+        if (_hookID == IntPtr.Zero) {
+            using (Process curProcess = Process.GetCurrentProcess())
+            using (ProcessModule curModule = curProcess.MainModule) {
+                _hookID = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(curModule.ModuleName), 0);
+            }
         }
     }
     
-    public static void StopHook() {
-        if (_hookID != IntPtr.Zero) {
-            UnhookWindowsHookEx(_hookID);
-            _hookID = IntPtr.Zero;
-        }
+    public static void SetBlockWinKey(bool block) {
+        _blockWinKey = block;
     }
     
     public static void HideTaskbar() {
@@ -129,58 +124,127 @@ public class KioskGuard {
         }
     }
     
-    public static void SetFullWorkArea(int width, int height) {
-        RECT rect = new RECT();
-        rect.Left = 0;
-        rect.Top = 0;
-        rect.Right = width;
-        rect.Bottom = height;
-        SystemParametersInfo(SPI_SETWORKAREA, 0, ref rect, SPIF_SENDCHANGE);
+    public static void ShowTaskbar() {
+        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
+        if (hwnd != IntPtr.Zero) {
+            EnableWindow(hwnd, true);
+            ShowWindow(hwnd, SW_SHOW);
+        }
+        IntPtr hwnd2 = FindWindow("Shell_SecondaryTrayWnd", null);
+        if (hwnd2 != IntPtr.Zero) {
+            EnableWindow(hwnd2, true);
+            ShowWindow(hwnd2, SW_SHOW);
+        }
     }
     
-    public static void MakeChromeFullscreen(IntPtr hwnd, int width, int height) {
+    public static void SetFullWorkArea(int w, int h) {
+        RECT r = new RECT(); r.Left = 0; r.Top = 0; r.Right = w; r.Bottom = h;
+        SystemParametersInfo(SPI_SETWORKAREA, 0, ref r, SPIF_SENDCHANGE);
+    }
+    
+    public static void RestoreWorkArea(int w, int h, int taskbarH) {
+        RECT r = new RECT(); r.Left = 0; r.Top = 0; r.Right = w; r.Bottom = h - taskbarH;
+        SystemParametersInfo(SPI_SETWORKAREA, 0, ref r, SPIF_SENDCHANGE);
+    }
+    
+    public static void MakeChromeFullscreen(IntPtr hwnd, int w, int h) {
         if (hwnd == IntPtr.Zero) return;
-        
-        // Remove window borders
         int style = GetWindowLong(hwnd, GWL_STYLE);
-        style = style & ~WS_CAPTION & ~WS_THICKFRAME;
-        SetWindowLong(hwnd, GWL_STYLE, style);
-        
-        // Position at 0,0 with exact dimensions
-        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, width, height, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+        SetWindowLong(hwnd, GWL_STYLE, style & ~WS_CAPTION & ~WS_THICKFRAME);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, w, h, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
         SetForegroundWindow(hwnd);
+    }
+    
+    public static void MakeChromeNormal(IntPtr hwnd) {
+        if (hwnd == IntPtr.Zero) return;
+        SetWindowPos(hwnd, HWND_NOTOPMOST, 50, 50, 1800, 950, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
     }
 }
 "@
 
-# Check if Chrome-only mode is enabled
-function Is-ChromeOnlyMode {
-    return (Test-Path "C:\ProgramData\msbmc-chrome-only.flag")
-}
-
-# Screen dimensions
+# Configuration
 $screenWidth = 1920
 $screenHeight = 1080
+$taskbarHeight = 40
+$chromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+$chromeProfileDir = "D:\ChromeProfile"
+$flagFile = "C:\ProgramData\msbmc-chrome-only.flag"
 
-# Start the keyboard hook to block Windows key
+# State
+$lastMode = $null
+
+function Is-ChromeOnlyMode {
+    return (Test-Path $flagFile)
+}
+
+function Start-Chrome {
+    $existing = Get-Process chrome -ErrorAction SilentlyContinue
+    if (-not $existing) {
+        Start-Process $chromePath -ArgumentList "--user-data-dir=`"$chromeProfileDir`""
+        Start-Sleep -Seconds 3
+    }
+}
+
+function Get-ChromeWindow {
+    $procs = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
+    if ($procs) { return $procs[0].MainWindowHandle }
+    return [IntPtr]::Zero
+}
+
+# Start keyboard hook (always running, but blocking is conditional)
 [KioskGuard]::StartHook()
-Write-Host "[KIOSK-GUARD] Keyboard hook installed - Windows key blocked" -ForegroundColor Green
-
-# Set work area to full screen (removes taskbar reservation)
-[KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
-Write-Host "[KIOSK-GUARD] Work area set to full screen: ${screenWidth}x${screenHeight}" -ForegroundColor Green
+Write-Host "[KIOSK-GUARD] Started - monitoring mode changes" -ForegroundColor Green
 
 # Main loop
 while ($true) {
-    if (Is-ChromeOnlyMode) {
-        # Hide taskbar
+    $chromeOnly = Is-ChromeOnlyMode
+    
+    # Detect mode change
+    if ($chromeOnly -ne $lastMode) {
+        if ($chromeOnly) {
+            Write-Host "[KIOSK-GUARD] >>> Chrome-only mode ENABLED <<<" -ForegroundColor Cyan
+            [KioskGuard]::SetBlockWinKey($true)
+            [KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
+            [KioskGuard]::HideTaskbar()
+        } else {
+            Write-Host "[KIOSK-GUARD] >>> Maintenance mode ENABLED <<<" -ForegroundColor Yellow
+            [KioskGuard]::SetBlockWinKey($false)
+            [KioskGuard]::ShowTaskbar()
+            [KioskGuard]::RestoreWorkArea($screenWidth, $screenHeight, $taskbarHeight)
+            
+            # Make Chrome normal window (not topmost, not fullscreen)
+            $hwnd = Get-ChromeWindow
+            if ($hwnd -ne [IntPtr]::Zero) {
+                [KioskGuard]::MakeChromeNormal($hwnd)
+            }
+        }
+        $lastMode = $chromeOnly
+    }
+    
+    # Chrome-only mode: enforce lockdown continuously
+    if ($chromeOnly) {
+        # Keep taskbar hidden
         [KioskGuard]::HideTaskbar()
         
-        # Find Chrome window and make it fullscreen
-        $chromeProcs = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
-        if ($chromeProcs) {
-            $hwnd = $chromeProcs[0].MainWindowHandle
+        # Check Chrome
+        $hwnd = Get-ChromeWindow
+        if ($hwnd -ne [IntPtr]::Zero) {
+            # Chrome running - keep it fullscreen and topmost
             [KioskGuard]::MakeChromeFullscreen($hwnd, $screenWidth, $screenHeight)
+        } else {
+            # Chrome not running - restart it
+            Write-Host "[KIOSK-GUARD] Chrome closed - restarting..." -ForegroundColor Yellow
+            Start-Chrome
+            Start-Sleep -Seconds 2
+            $hwnd = Get-ChromeWindow
+            if ($hwnd -ne [IntPtr]::Zero) {
+                [KioskGuard]::MakeChromeFullscreen($hwnd, $screenWidth, $screenHeight)
+            }
+        }
+    }
+    
+    Start-Sleep -Seconds 2
+}
         }
     }
     

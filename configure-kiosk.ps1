@@ -39,6 +39,7 @@ Write-Host "[1/5] Creating chrome-only-toggle.ps1..." -ForegroundColor Yellow
 
 $toggleScriptPath = "C:\ProgramData\msbmc-chrome-only-toggle.ps1"
 
+# SIMPLIFIED toggle - KioskGuard does all the heavy lifting
 $toggleScriptContent = @'
 
 param(
@@ -47,7 +48,17 @@ param(
 )
 
 $ChromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-$ChromeProfileDir = "D:\ChromeProfile"  # Always use D:\ persistent profile
+$ChromeProfileDir = "D:\ChromeProfile"
+$flagFile = "C:\ProgramData\msbmc-chrome-only.flag"
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class ShellNotify {
+    [DllImport("shell32.dll")]
+    public static extern void SHChangeNotify(int eventId, int flags, IntPtr item1, IntPtr item2);
+}
+"@
 
 if ($Enable) {
     Write-Host "[CHROME-ONLY] Enabling Chrome-only mode..." -ForegroundColor Green
@@ -55,307 +66,46 @@ if ($Enable) {
     # Verify profile exists
     if (-not (Test-Path $ChromeProfileDir)) {
         Write-Host "[ERROR] Chrome profile not found at $ChromeProfileDir" -ForegroundColor Red
-        Write-Host "Please run setup-ami-interactive.ps1 first to create the profile." -ForegroundColor Yellow
         return
     }
     
-    Write-Host "[INFO] Using Chrome profile: $ChromeProfileDir" -ForegroundColor Cyan
+    # Create flag file - KioskGuard monitors this
+    Set-Content -Path $flagFile -Value "enabled"
+    Write-Host "   [OK] Flag file created" -ForegroundColor Green
     
-    # Create flag file
-    Set-Content -Path "C:\ProgramData\msbmc-chrome-only.flag" -Value "enabled"
-    
-    # Enable and start Kiosk Guard (blocks Windows key + maintains fullscreen)
-    Enable-ScheduledTask -TaskName "MSBMC-KioskGuard" -ErrorAction SilentlyContinue | Out-Null
-    Start-ScheduledTask -TaskName "MSBMC-KioskGuard" -ErrorAction SilentlyContinue
-    
-    # Enable Chrome Watchdog (mantiene Chrome sempre attivo e in primo piano)
-    Enable-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue | Out-Null
-    
-    # Start watchdog BEFORE Chrome (così monitora subito)
-    Start-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    
-    # Hide desktop icons via registry
+    # Hide desktop icons
     $desktopRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
     if (-not (Test-Path $desktopRegPath)) {
         New-Item -Path $desktopRegPath -Force | Out-Null
     }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 1 -Force
+    [ShellNotify]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+    Write-Host "   [OK] Desktop icons hidden" -ForegroundColor Green
     
-    # Load Windows API types
-    if (-not ([System.Management.Automation.PSTypeName]'KioskHelper').Type) {
-        $code = @"
-using System;
-using System.Runtime.InteropServices;
-
-public class KioskHelper {
-    [DllImport("shell32.dll")]
-    public static extern void SHChangeNotify(int eventId, int flags, IntPtr item1, IntPtr item2);
-    
-    [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string className, string windowName);
-    
-    [DllImport("user32.dll")]
-    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
-    
-    [DllImport("user32.dll")]
-    public static extern int ShowWindow(IntPtr hwnd, int command);
-    
-    [DllImport("user32.dll")]
-    public static extern bool EnableWindow(IntPtr hwnd, bool enable);
-    
-    [DllImport("user32.dll")]
-    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-    
-    [DllImport("user32.dll")]
-    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-    
-    [DllImport("user32.dll")]
-    public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
-    
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-    
-    [DllImport("user32.dll")]
-    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    
-    public const int SW_HIDE = 0;
-    public const int SW_SHOW = 5;
-    public const int GWL_STYLE = -16;
-    public const int GWL_EXSTYLE = -20;
-    public const int WS_CAPTION = 0x00C00000;
-    public const int WS_THICKFRAME = 0x00040000;
-    public const int WS_EX_APPWINDOW = 0x00040000;
-    public const int WS_EX_TOOLWINDOW = 0x00000080;
-    
-    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
-    public const uint SWP_NOSIZE = 0x0001;
-    public const uint SWP_NOMOVE = 0x0002;
-    public const uint SWP_SHOWWINDOW = 0x0040;
-    public const uint SWP_FRAMECHANGED = 0x0020;
-    
-    public static void HideTaskbar() {
-        // Hide main taskbar
-        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
-        if (hwnd != IntPtr.Zero) {
-            ShowWindow(hwnd, SW_HIDE);
-            EnableWindow(hwnd, false);  // Disable clicks
-        }
-        // Hide secondary taskbar (multi-monitor)
-        IntPtr hwnd2 = FindWindow("Shell_SecondaryTrayWnd", null);
-        if (hwnd2 != IntPtr.Zero) {
-            ShowWindow(hwnd2, SW_HIDE);
-            EnableWindow(hwnd2, false);
-        }
-        // Hide Start button separately
-        IntPtr startBtn = FindWindow("Button", "Start");
-        if (startBtn != IntPtr.Zero) {
-            ShowWindow(startBtn, SW_HIDE);
-        }
+    # Start Chrome if not running (KioskGuard will position it)
+    $existing = Get-Process chrome -ErrorAction SilentlyContinue
+    if (-not $existing) {
+        Start-Process $ChromePath -ArgumentList "--user-data-dir=`"$ChromeProfileDir`""
+        Write-Host "   [OK] Chrome started" -ForegroundColor Green
     }
     
-    public static void ShowTaskbar() {
-        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
-        if (hwnd != IntPtr.Zero) {
-            EnableWindow(hwnd, true);
-            ShowWindow(hwnd, SW_SHOW);
-        }
-        IntPtr hwnd2 = FindWindow("Shell_SecondaryTrayWnd", null);
-        if (hwnd2 != IntPtr.Zero) {
-            EnableWindow(hwnd2, true);
-            ShowWindow(hwnd2, SW_SHOW);
-        }
-        IntPtr startBtn = FindWindow("Button", "Start");
-        if (startBtn != IntPtr.Zero) {
-            ShowWindow(startBtn, SW_SHOW);
-        }
-    }
-}
-"@
-        Add-Type -TypeDefinition $code
-    }
-    
-    # Refresh shell to apply icon hide
-    [KioskHelper]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
-    
-    # HIDE AND DISABLE taskbar completely
-    Start-Sleep -Seconds 1
-    [KioskHelper]::HideTaskbar()
-    
-    # Disable Windows key via Scancode Map (requires logoff but we also use policy)
-    $explorerPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
-    if (-not (Test-Path $explorerPolicyPath)) {
-        New-Item -Path $explorerPolicyPath -Force | Out-Null
-    }
-    Set-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Value 1 -Force
-    
-    # Also set system-wide policy (more reliable)
-    $systemPolicyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
-    if (-not (Test-Path $systemPolicyPath)) {
-        New-Item -Path $systemPolicyPath -Force | Out-Null
-    }
-    Set-ItemProperty -Path $systemPolicyPath -Name "NoWinKeys" -Value 1 -Force -ErrorAction SilentlyContinue
-    
-    Write-Host "   [OK] Taskbar hidden + disabled, Windows key blocked" -ForegroundColor Green
-    
-    # Start Chrome WITHOUT maximize (we'll position it manually to cover full screen)
-    Write-Host "[INFO] Starting Chrome with profile: $ChromeProfileDir" -ForegroundColor Cyan
-    
-    # Check if Chrome is already running - don't start multiple instances
-    $existingChrome = Get-Process chrome -ErrorAction SilentlyContinue
-    if (-not $existingChrome) {
-        # Start Chrome in windowed mode with slightly larger dimensions to cover borders
-        # Position at -8,-8 to hide window borders/title bar edges
-        $argString = "--user-data-dir=`"$ChromeProfileDir`" --window-size=1936,1096 --window-position=-8,-8"
-        Start-Process $ChromePath -ArgumentList $argString
-        Start-Sleep -Seconds 5
-        
-        # Remove window borders using SetWindowLong to make it borderless
-        if (-not ([System.Management.Automation.PSTypeName]'WindowStyle').Type) {
-            Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class WindowStyle {
-    [DllImport("user32.dll")]
-    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-    [DllImport("user32.dll")]
-    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-    [DllImport("user32.dll")]
-    public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")]
-    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    
-    public const int GWL_STYLE = -16;
-    public const int WS_CAPTION = 0x00C00000;
-    public const int WS_THICKFRAME = 0x00040000;
-
-    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-    public const uint SWP_NOSIZE = 0x0001;
-    public const uint SWP_NOMOVE = 0x0002;
-    public const uint SWP_SHOWWINDOW = 0x0040;
-}
-"@
-        }
-        
-        # Get Chrome window and make it borderless + resize to exact full screen
-        Start-Sleep -Seconds 2
-        $chromeWindows = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
-        if ($chromeWindows) {
-            $mainWindow = $chromeWindows[0].MainWindowHandle
-            
-            # Remove window caption and frame (borders)
-            $currentStyle = [WindowStyle]::GetWindowLong($mainWindow, [WindowStyle]::GWL_STYLE)
-            $newStyle = $currentStyle -band (-bnot [WindowStyle]::WS_CAPTION) -band (-bnot [WindowStyle]::WS_THICKFRAME)
-            [WindowStyle]::SetWindowLong($mainWindow, [WindowStyle]::GWL_STYLE, $newStyle) | Out-Null
-            
-            Start-Sleep -Milliseconds 500
-            
-            # Now move to exact position covering entire screen and force always-on-top
-            [WindowStyle]::MoveWindow($mainWindow, 0, 0, 1920, 1080, $true) | Out-Null
-            [WindowStyle]::SetForegroundWindow($mainWindow) | Out-Null
-            [WindowStyle]::SetWindowPos(
-                $mainWindow,
-                [WindowStyle]::HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                [WindowStyle]::SWP_NOSIZE -bor [WindowStyle]::SWP_NOMOVE -bor [WindowStyle]::SWP_SHOWWINDOW
-            ) | Out-Null
-        }
-        
-        Write-Host "   [OK] Chrome borderless and positioned to cover full screen" -ForegroundColor Green
-    } else {
-        Write-Host "   [SKIP] Chrome already running" -ForegroundColor Yellow
-    }
-    
-    Write-Host "[CHROME-ONLY] Done! Chrome maximized covering full screen, desktop locked." -ForegroundColor Green
-    Write-Host "[CHROME-ONLY] Windows key disabled. Press ESC 3x + password to exit." -ForegroundColor Yellow
+    Write-Host "[CHROME-ONLY] Mode enabled - KioskGuard will enforce lockdown" -ForegroundColor Cyan
+    Write-Host "[CHROME-ONLY] Press ESC 3x + password to exit" -ForegroundColor Yellow
     
 } elseif ($Disable) {
     Write-Host "[CHROME-ONLY] Disabling Chrome-only mode..." -ForegroundColor Yellow
     
-    # Re-enable Windows key (both user and system)
-    $explorerPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
-    if (Test-Path $explorerPolicyPath) {
-        Remove-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Force -ErrorAction SilentlyContinue
-    }
-    $systemPolicyPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
-    if (Test-Path $systemPolicyPath) {
-        Remove-ItemProperty -Path $systemPolicyPath -Name "NoWinKeys" -Force -ErrorAction SilentlyContinue
-    }
-    
-    Write-Host "   [OK] Windows key re-enabled" -ForegroundColor Green
-    
-    # Stop and disable Kiosk Guard (stops keyboard hook)
-    Stop-ScheduledTask -TaskName "MSBMC-KioskGuard" -ErrorAction SilentlyContinue
-    Disable-ScheduledTask -TaskName "MSBMC-KioskGuard" -ErrorAction SilentlyContinue | Out-Null
-    # Kill any running kiosk guard process
-    Get-Process powershell -ErrorAction SilentlyContinue | Where-Object { 
-        $_.CommandLine -like "*kiosk-guard*" 
-    } | Stop-Process -Force -ErrorAction SilentlyContinue
-    
-    # Disable Chrome Watchdog
-    Disable-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue | Out-Null
-    Stop-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue
-    
-    # Remove flag file
-    Remove-Item -Path "C:\ProgramData\msbmc-chrome-only.flag" -Force -ErrorAction SilentlyContinue
+    # Remove flag file - KioskGuard will detect and restore normal mode
+    Remove-Item -Path $flagFile -Force -ErrorAction SilentlyContinue
+    Write-Host "   [OK] Flag file removed" -ForegroundColor Green
     
     # Show desktop icons
     $desktopRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
-    if (-not (Test-Path $desktopRegPath)) {
-        New-Item -Path $desktopRegPath -Force | Out-Null
-    }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 0 -Force
+    [ShellNotify]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
+    Write-Host "   [OK] Desktop icons shown" -ForegroundColor Green
     
-    # Show taskbar using KioskHelper (already loaded)
-    if ([System.Management.Automation.PSTypeName]'KioskHelper'.Type) {
-        [KioskHelper]::ShowTaskbar()
-        [KioskHelper]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
-    } else {
-        # Fallback if KioskHelper not loaded
-        $code = @"
-using System;
-using System.Runtime.InteropServices;
-public class TaskbarShow {
-    [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string className, string windowName);
-    [DllImport("user32.dll")]
-    public static extern int ShowWindow(IntPtr hwnd, int command);
-    [DllImport("user32.dll")]
-    public static extern bool EnableWindow(IntPtr hwnd, bool enable);
-    public static void Show() {
-        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
-        if (hwnd != IntPtr.Zero) {
-            EnableWindow(hwnd, true);
-            ShowWindow(hwnd, 5);  // SW_SHOW
-        }
-    }
-}
-public class ShellRefresh {
-    [DllImport("shell32.dll")]
-    public static extern void SHChangeNotify(int eventId, int flags, IntPtr item1, IntPtr item2);
-}
-"@
-    
-        if (-not ([System.Management.Automation.PSTypeName]'TaskbarShow').Type) {
-            Add-Type -TypeDefinition $code
-        }
-        
-        [TaskbarShow]::Show()
-        
-        # Refresh shell to show icons
-        [ShellRefresh]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
-    }
-    
-    # Kill Chrome
-    Stop-Process -Name "chrome" -Force -ErrorAction SilentlyContinue
-    
-    Write-Host "[CHROME-ONLY] Normal mode restored." -ForegroundColor Green
+    Write-Host "[CHROME-ONLY] Maintenance mode - KioskGuard will restore taskbar" -ForegroundColor Cyan
     
 } else {
     Write-Host "Usage: msbmc-chrome-only-toggle.ps1 -Enable | -Disable"
@@ -364,11 +114,10 @@ public class ShellRefresh {
 
 $toggleScriptContent | Set-Content -Path $toggleScriptPath -Encoding UTF8 -Force
 Write-Host "   Created: $toggleScriptPath" -ForegroundColor Green
-
 # =============================================================================
 # STEP 2: Create ESC Monitor (always running, handles 3x ESC)
 # =============================================================================
-Write-Host "[2/5] Creating ESC monitor script..." -ForegroundColor Yellow
+Write-Host "[2/4] Creating ESC monitor script..." -ForegroundColor Yellow
 
 $escMonitorPath = "C:\ProgramData\msbmc-esc-monitor.ps1"
 
@@ -530,7 +279,7 @@ Write-Host "   Created: $escMonitorPath" -ForegroundColor Green
 # =============================================================================
 # STEP 3: Create Scheduled Task to run ESC monitor at logon
 # =============================================================================
-Write-Host "[3/5] Creating ESC monitor task..." -ForegroundColor Yellow
+Write-Host "[3/4] Creating ESC monitor task..." -ForegroundColor Yellow
 
 $taskName = "MSBMC-EscMonitor"
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -557,7 +306,7 @@ Write-Host "   Created: $taskName (runs at logon)" -ForegroundColor Green
 # =============================================================================
 # STEP 4: Create Kiosk Guard Script (blocks Windows key + fullscreen Chrome)
 # =============================================================================
-Write-Host "[4/5] Creating Kiosk Guard script..." -ForegroundColor Yellow
+Write-Host "[4/4] Creating Kiosk Guard script and scheduled task..." -ForegroundColor Yellow
 
 $kioskGuardPath = "C:\ProgramData\msbmc-kiosk-guard.ps1"
 $kioskGuardContent = @'
@@ -729,61 +478,7 @@ $kioskGuardPrincipal = New-ScheduledTaskPrincipal -UserId "msbmc" -LogonType Int
 $kioskGuardSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 
 Register-ScheduledTask -TaskName $kioskGuardTaskName -Action $kioskGuardAction -Trigger $kioskGuardTrigger -Principal $kioskGuardPrincipal -Settings $kioskGuardSettings -Force | Out-Null
-Write-Host "   Created: $kioskGuardTaskName (keyboard hook + fullscreen)" -ForegroundColor Green
-
-# =============================================================================
-# STEP 5: Create Startup Task to Restore Chrome-Only Mode
-# =============================================================================
-Write-Host "[5/5] Creating Chrome-only mode restore task..." -ForegroundColor Yellow
-
-$restoreScriptPath = "C:\ProgramData\msbmc-restore-chrome-only.ps1"
-$restoreScriptContent = @'
-# This script runs at logon to ALWAYS restore Chrome-only mode
-# Even if operator exited before reboot, we return to Chrome-only mode
-
-$logFile = "C:\MSBMC\Logs\restore-chrome-only.log"
-$logDir = Split-Path $logFile -Parent
-if (-not (Test-Path $logDir)) {
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-}
-
-"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Restore task started" | Add-Content $logFile
-
-Start-Sleep -Seconds 10  # Wait for desktop, watchdog, and other services to stabilize
-
-"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Calling toggle -Enable" | Add-Content $logFile
-
-# ALWAYS enable Chrome-only mode at boot
-# Operator can temporarily exit with ESC 3x + password, but reboot resets to Chrome-only
-try {
-    & "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Enable 2>&1 | Add-Content $logFile
-    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Toggle completed successfully" | Add-Content $logFile
-} catch {
-    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Toggle failed: $_" | Add-Content $logFile
-}
-'@
-$restoreScriptContent | Set-Content -Path $restoreScriptPath -Encoding UTF8 -Force
-
-$restoreTaskName = "MSBMC-RestoreChromeOnly"
-$existingRestoreTask = Get-ScheduledTask -TaskName $restoreTaskName -ErrorAction SilentlyContinue
-if ($existingRestoreTask) {
-    Unregister-ScheduledTask -TaskName $restoreTaskName -Confirm:$false
-}
-
-$restoreVbsPath = "C:\ProgramData\msbmc-restore-chrome-only-launcher.vbs"
-$restoreVbsContent = @'
-Set objShell = CreateObject("Wscript.Shell")
-objShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""C:\ProgramData\msbmc-restore-chrome-only.ps1""", 0, False
-'@
-$restoreVbsContent | Set-Content -Path $restoreVbsPath -Encoding ASCII -Force
-
-$restoreAction = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$restoreVbsPath`""
-$restoreTrigger = New-ScheduledTaskTrigger -AtLogOn -User "msbmc"
-$restorePrincipal = New-ScheduledTaskPrincipal -UserId "msbmc" -LogonType Interactive -RunLevel Highest
-$restoreSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-
-Register-ScheduledTask -TaskName $restoreTaskName -Action $restoreAction -Trigger $restoreTrigger -Principal $restorePrincipal -Settings $restoreSettings -Force | Out-Null
-Write-Host "   Created: $restoreTaskName (restores Chrome-only mode at boot)" -ForegroundColor Green
+Write-Host "   Created: $kioskGuardTaskName (runs at logon, monitors flag file)" -ForegroundColor Green
 
 # =============================================================================
 # Summary
@@ -794,8 +489,12 @@ Write-Host "   SETUP COMPLETE" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "How it works:" -ForegroundColor Cyan
-Write-Host "   Normal mode → ESC 3x → Chrome-only mode" -ForegroundColor White
-Write-Host "   Chrome-only → ESC 3x → Password → Normal mode" -ForegroundColor White
+Write-Host "   - KioskGuard runs at logon and monitors the flag file" -ForegroundColor White
+Write-Host "   - When flag exists: blocks Win key, hides taskbar, Chrome fullscreen" -ForegroundColor White
+Write-Host "   - When flag removed (via ESC 3x): restores normal mode" -ForegroundColor White
+Write-Host ""
+Write-Host "   Normal mode -> ESC 3x -> Chrome-only mode" -ForegroundColor White
+Write-Host "   Chrome-only -> ESC 3x -> Password -> Maintenance mode" -ForegroundColor White
 Write-Host ""
 Write-Host "Password: $KioskPassword" -ForegroundColor Yellow
 Write-Host ""
@@ -803,6 +502,11 @@ Write-Host "Manual:" -ForegroundColor Cyan
 Write-Host "   Enable:  & '$toggleScriptPath' -Enable" -ForegroundColor Gray
 Write-Host "   Disable: & '$toggleScriptPath' -Disable" -ForegroundColor Gray
 Write-Host ""
+
+# Start KioskGuard now
+Write-Host "Starting KioskGuard..." -ForegroundColor Yellow
+Start-Process wscript.exe -ArgumentList "`"$kioskGuardVbsPath`"" -WindowStyle Hidden
+Write-Host "[OK] KioskGuard running!" -ForegroundColor Green
 
 # Start the ESC monitor now
 Write-Host "Starting ESC monitor..." -ForegroundColor Yellow
@@ -812,10 +516,10 @@ Write-Host ""
 
 # Enable Chrome-only mode automatically
 Write-Host "Enabling Chrome-only mode as default..." -ForegroundColor Yellow
-Write-Host "  (instances will boot directly to Chrome with espn.com)" -ForegroundColor Cyan
 & $toggleScriptPath -Enable
+Write-Host ""
 Write-Host "[OK] Chrome-only mode enabled!" -ForegroundColor Green
 Write-Host ""
 Write-Host "After reboot, Chrome will be the only visible application." -ForegroundColor Cyan
-Write-Host "Press ESC 3x + password 'msbmc2024' to restore normal mode." -ForegroundColor Cyan
+Write-Host "Press ESC 3x + password 'msbmc2024' to restore maintenance mode." -ForegroundColor Cyan
 Write-Host ""
