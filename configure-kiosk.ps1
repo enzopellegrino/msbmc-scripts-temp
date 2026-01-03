@@ -459,11 +459,26 @@ $restoreScriptContent = @'
 # This script runs at logon to ALWAYS restore Chrome-only mode
 # Even if operator exited before reboot, we return to Chrome-only mode
 
-Start-Sleep -Seconds 8  # Wait for desktop, watchdog, and other services to stabilize
+$logFile = "C:\MSBMC\Logs\restore-chrome-only.log"
+$logDir = Split-Path $logFile -Parent
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+
+"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Restore task started" | Add-Content $logFile
+
+Start-Sleep -Seconds 10  # Wait for desktop, watchdog, and other services to stabilize
+
+"[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Calling toggle -Enable" | Add-Content $logFile
 
 # ALWAYS enable Chrome-only mode at boot
 # Operator can temporarily exit with ESC 3x + password, but reboot resets to Chrome-only
-& "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Enable
+try {
+    & "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Enable 2>&1 | Add-Content $logFile
+    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Toggle completed successfully" | Add-Content $logFile
+} catch {
+    "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Toggle failed: $_" | Add-Content $logFile
+}
 '@
 $restoreScriptContent | Set-Content -Path $restoreScriptPath -Encoding UTF8 -Force
 
