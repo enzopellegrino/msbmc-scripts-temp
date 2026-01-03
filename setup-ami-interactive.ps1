@@ -641,11 +641,11 @@ $finalChrome = Test-ChromeConfigured
 $finalWatchdog = Test-ChromeWatchdogInstalled
 $finalKiosk = Test-KioskConfigured
 
-$s1 = if ($finalResolution) { "✓" } else { "✗" }
-$s2 = if ($finalVBAudio) { "✓" } else { "✗" }
-$s3 = if ($finalChrome) { "✓" } else { "✗" }
-$s4 = if ($finalWatchdog) { "✓" } else { "✗" }
-$s5 = if ($finalKiosk) { "✓" } else { "✗" }
+$s1 = if ($finalResolution) { "[OK]" } else { "[  ]" }
+$s2 = if ($finalVBAudio) { "[OK]" } else { "[  ]" }
+$s3 = if ($finalChrome) { "[OK]" } else { "[  ]" }
+$s4 = if ($finalWatchdog) { "[OK]" } else { "[  ]" }
+$s5 = if ($finalKiosk) { "[OK]" } else { "[  ]" }
 
 $c1 = if ($finalResolution) { "Green" } else { "Red" }
 $c2 = if ($finalVBAudio) { "Green" } else { "Red" }
@@ -686,7 +686,7 @@ if ($finalVBAudio -and -not (Get-WmiObject Win32_SoundDevice | Where-Object { $_
 
 if ($rebootRequired) {
     Write-Host "========================================" -ForegroundColor Yellow
-    Write-Host "⚠️  REBOOT REQUIRED" -ForegroundColor Yellow
+    Write-Host "REBOOT REQUIRED" -ForegroundColor Yellow
     Write-Host "========================================" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "A reboot is required to:" -ForegroundColor White
@@ -712,7 +712,7 @@ if ($rebootRequired) {
     }
 } else {
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "✓ System Ready" -ForegroundColor Green
+    Write-Host "System Ready" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
 }
 
@@ -730,7 +730,7 @@ $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
 } catch {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Red
-    Write-Host "❌ ERROR: Configuration Failed" -ForegroundColor Red
+    Write-Host "ERROR: Configuration Failed" -ForegroundColor Red
     Write-Host "========================================" -ForegroundColor Red
     Write-Host ""
     Write-Host "Error details:" -ForegroundColor Yellow
