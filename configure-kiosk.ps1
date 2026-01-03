@@ -164,10 +164,17 @@ public class WindowStyle {
     public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     
     public const int GWL_STYLE = -16;
     public const int WS_CAPTION = 0x00C00000;
     public const int WS_THICKFRAME = 0x00040000;
+
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_SHOWWINDOW = 0x0040;
 }
 "@
         }
@@ -185,9 +192,18 @@ public class WindowStyle {
             
             Start-Sleep -Milliseconds 500
             
-            # Now move to exact position covering entire screen
+            # Now move to exact position covering entire screen and force always-on-top
             [WindowStyle]::MoveWindow($mainWindow, 0, 0, 1920, 1080, $true) | Out-Null
             [WindowStyle]::SetForegroundWindow($mainWindow) | Out-Null
+            [WindowStyle]::SetWindowPos(
+                $mainWindow,
+                [WindowStyle]::HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                [WindowStyle]::SWP_NOSIZE -bor [WindowStyle]::SWP_NOMOVE -bor [WindowStyle]::SWP_SHOWWINDOW
+            ) | Out-Null
         }
         
         Write-Host "   [OK] Chrome borderless and positioned to cover full screen" -ForegroundColor Green
