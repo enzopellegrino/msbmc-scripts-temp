@@ -226,7 +226,7 @@ if (-not $baseCheck.Success) {
     Write-Host ""
     Write-Host "The following prerequisites are missing:" -ForegroundColor Yellow
     foreach ($error in $baseCheck.Errors) {
-        Write-Host "  ✗ $error" -ForegroundColor Red
+        Write-Host "  [X] $error" -ForegroundColor Red
     }
     Write-Host ""
     Write-Host "This means the Packer build did not complete successfully." -ForegroundColor Yellow
@@ -237,14 +237,14 @@ if (-not $baseCheck.Success) {
     exit 1
 }
 
-Write-Host "✓ Chrome installed" -ForegroundColor Green
-Write-Host "✓ ChromeDriver installed" -ForegroundColor Green
-Write-Host "✓ FFmpeg installed" -ForegroundColor Green
-Write-Host "✓ Python installed" -ForegroundColor Green
-Write-Host "✓ TightVNC installed" -ForegroundColor Green
-Write-Host "✓ noVNC installed" -ForegroundColor Green
-Write-Host "✓ MSBMC scripts present" -ForegroundColor Green
-Write-Host "✓ User msbmc exists" -ForegroundColor Green
+Write-Host "[OK] Chrome installed" -ForegroundColor Green
+Write-Host "[OK] ChromeDriver installed" -ForegroundColor Green
+Write-Host "[OK] FFmpeg installed" -ForegroundColor Green
+Write-Host "[OK] Python installed" -ForegroundColor Green
+Write-Host "[OK] TightVNC installed" -ForegroundColor Green
+Write-Host "[OK] noVNC installed" -ForegroundColor Green
+Write-Host "[OK] MSBMC scripts present" -ForegroundColor Green
+Write-Host "[OK] User msbmc exists" -ForegroundColor Green
 Write-Host ""
 Write-Host "BASE AMI prerequisites OK!" -ForegroundColor Green
 Write-Host ""
@@ -262,15 +262,15 @@ $watchdogDone = Test-ChromeWatchdogInstalled
 $kioskDone = Test-KioskConfigured
 
 # Display status
-$status1 = if ($resolutionDone) { "[✓]" } else { "[ ]" }
+$status1 = if ($resolutionDone) { "[OK]" } else { "[  ]" }
 $color1 = if ($resolutionDone) { "Green" } else { "Yellow" }
-$status2 = if ($vbaudioDone) { "[✓]" } else { "[ ]" }
+$status2 = if ($vbaudioDone) { "[OK]" } else { "[  ]" }
 $color2 = if ($vbaudioDone) { "Green" } else { "Yellow" }
-$status3 = if ($chromeDone) { "[✓]" } else { "[ ]" }
+$status3 = if ($chromeDone) { "[OK]" } else { "[  ]" }
 $color3 = if ($chromeDone) { "Green" } else { "Yellow" }
-$status4 = if ($watchdogDone) { "[✓]" } else { "[ ]" }
+$status4 = if ($watchdogDone) { "[OK]" } else { "[  ]" }
 $color4 = if ($watchdogDone) { "Green" } else { "Yellow" }
-$status5 = if ($kioskDone) { "[✓]" } else { "[ ]" }
+$status5 = if ($kioskDone) { "[OK]" } else { "[  ]" }
 $color5 = if ($kioskDone) { "Green" } else { "Yellow" }
 
 Write-Host "Configuration Status:" -ForegroundColor Cyan
