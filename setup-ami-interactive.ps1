@@ -508,6 +508,39 @@ if ((Test-Path $profileDir) -and (Test-Path $markerFile)) {
         } else {
             Write-Host "[OK] Desktop shortcut already exists" -ForegroundColor Green
         }
+        
+        # Remove default Chrome shortcuts (not using persistent profile)
+        Write-Host ""
+        Write-Host "Cleaning up default Chrome shortcuts..." -ForegroundColor Yellow
+        
+        $shortcutsToRemove = @(
+            "Google Chrome.lnk",
+            "Chrome.lnk"
+        )
+        
+        foreach ($shortcut in $shortcutsToRemove) {
+            $path = Join-Path $desktopPath $shortcut
+            if (Test-Path $path) {
+                Remove-Item $path -Force
+                Write-Host "  Removed: $shortcut" -ForegroundColor Cyan
+            }
+        }
+        
+        # Unpin Chrome from taskbar (remove taskbar shortcut)
+        Write-Host ""
+        Write-Host "Unpinning Chrome from taskbar..." -ForegroundColor Yellow
+        try {
+            $taskbarPath = "$env:APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
+            Get-ChildItem $taskbarPath -Filter "*Chrome*.lnk" | ForEach-Object {
+                Remove-Item $_.FullName -Force
+                Write-Host "  Removed taskbar pin: $($_.Name)" -ForegroundColor Cyan
+            }
+        } catch {
+            Write-Host "  [INFO] No taskbar pins to remove" -ForegroundColor Gray
+        }
+        
+        Write-Host "[OK] Chrome shortcuts cleaned up" -ForegroundColor Green
+        
     } catch {
         Write-Host "[WARN] Could not create desktop shortcut: $_" -ForegroundColor Yellow
     }
