@@ -62,7 +62,8 @@ if ($Enable) {
     Enable-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue | Out-Null
     
     # Hide taskbar using Windows API
-    Add-Type @"
+    if (-not ([System.Management.Automation.PSTypeName]'Taskbar').Type) {
+        Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class Taskbar {
@@ -76,10 +77,14 @@ public class Taskbar {
     }
 }
 "@
+    }
     [Taskbar]::Hide()
     
     # Hide desktop icons via registry
     $desktopRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    if (-not (Test-Path $desktopRegPath)) {
+        New-Item -Path $desktopRegPath -Force | Out-Null
+    }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 1 -Force
     
     # Refresh explorer to apply desktop icons hide
@@ -110,10 +115,14 @@ public class Taskbar {
     
     # Show desktop icons
     $desktopRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    if (-not (Test-Path $desktopRegPath)) {
+        New-Item -Path $desktopRegPath -Force | Out-Null
+    }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 0 -Force
     
     # Show taskbar using Windows API
-    Add-Type @"
+    if (-not ([System.Management.Automation.PSTypeName]'TaskbarShow').Type) {
+        Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public class TaskbarShow {
@@ -127,6 +136,7 @@ public class TaskbarShow {
     }
 }
 "@
+    }
     [TaskbarShow]::Show()
     
     # Kill Chrome
