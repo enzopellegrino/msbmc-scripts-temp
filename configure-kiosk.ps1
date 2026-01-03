@@ -117,11 +117,10 @@ public class Taskbar {
     # Start Chrome MAXIMIZED with EXACT same args as desktop shortcut
     # IMPORTANT: Use simple args like shortcut to preserve extensions
     Write-Host "[INFO] Starting Chrome with profile: $ChromeProfileDir" -ForegroundColor Cyan
-    $chromeArgs = @(
-        "--start-maximized"
-        "--user-data-dir=`"$ChromeProfileDir`""
-    )
-    Start-Process $ChromePath -ArgumentList $chromeArgs
+    
+    # Build argument string (PowerShell handles quoting automatically)
+    $argString = "--start-maximized --user-data-dir=`"$ChromeProfileDir`""
+    Start-Process $ChromePath -ArgumentList $argString
     
     Write-Host "[CHROME-ONLY] Done! Chrome maximized, desktop locked." -ForegroundColor Green
     Write-Host "[CHROME-ONLY] Press ESC 3x + password 'msbmc2024' to exit." -ForegroundColor Yellow
