@@ -99,6 +99,14 @@ function Clear-ChromeRestoreData {
 
 # Function to start Chrome maximized
 function Start-ChromeMaximized {
+    # Check if Chrome is already running - avoid duplicate instances
+    $existingChrome = Get-Process chrome -ErrorAction SilentlyContinue
+    if ($existingChrome) {
+        Write-Host "[WATCHDOG] Chrome already running - skipping start" -ForegroundColor Yellow
+        return
+    }
+    
+    Write-Host "[WATCHDOG] Starting Chrome..." -ForegroundColor Cyan
     $argString = "--start-maximized --user-data-dir=`"$profileDir`""
     Start-Process $chromePath -ArgumentList $argString
     Start-Sleep -Seconds 3

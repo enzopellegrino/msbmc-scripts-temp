@@ -118,9 +118,16 @@ public class Taskbar {
     # IMPORTANT: Use simple args like shortcut to preserve extensions
     Write-Host "[INFO] Starting Chrome with profile: $ChromeProfileDir" -ForegroundColor Cyan
     
-    # Build argument string (PowerShell handles quoting automatically)
-    $argString = "--start-maximized --user-data-dir=`"$ChromeProfileDir`""
-    Start-Process $ChromePath -ArgumentList $argString
+    # Check if Chrome is already running - don't start multiple instances
+    $existingChrome = Get-Process chrome -ErrorAction SilentlyContinue
+    if (-not $existingChrome) {
+        # Build argument string (PowerShell handles quoting automatically)
+        $argString = "--start-maximized --user-data-dir=`"$ChromeProfileDir`""
+        Start-Process $ChromePath -ArgumentList $argString
+        Write-Host "   [OK] Chrome started" -ForegroundColor Green
+    } else {
+        Write-Host "   [SKIP] Chrome already running" -ForegroundColor Yellow
+    }
     
     Write-Host "[CHROME-ONLY] Done! Chrome maximized, desktop locked." -ForegroundColor Green
     Write-Host "[CHROME-ONLY] Press ESC 3x + password 'msbmc2024' to exit." -ForegroundColor Yellow
@@ -384,12 +391,13 @@ $restoreScriptPath = "C:\ProgramData\msbmc-restore-chrome-only.ps1"
 $restoreScriptContent = @'
 # This script runs at logon to restore Chrome-only mode if it was active before reboot
 
-Start-Sleep -Seconds 5  # Wait for desktop to stabilize
+Start-Sleep -Seconds 8  # Wait for desktop, watchdog, and other services to stabilize
 
 $flagPath = "C:\ProgramData\msbmc-chrome-only.flag"
 
 if (Test-Path $flagPath) {
     # Chrome-only mode was active - restore it
+    # The toggle script will check if Chrome is already running before starting
     & "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Enable
 }
 '@
