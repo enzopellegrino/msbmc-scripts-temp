@@ -249,8 +249,8 @@ function Wait-ForDesktop {
 # ============================================================================
 Write-Log "KioskGuard starting..."
 
-# Wait for desktop to be fully loaded
-Wait-ForDesktop
+# Small delay for system stability at boot
+Start-Sleep -Seconds 5
 
 # AUTO-CREATE flag file at boot (default to chrome-only mode)
 if (-not (Test-Path $flagFile)) {
