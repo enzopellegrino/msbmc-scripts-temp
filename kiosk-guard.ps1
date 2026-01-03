@@ -212,10 +212,27 @@ function Is-ChromeOnlyMode {
 }
 
 function Start-Chrome {
+    Write-Log "Start-Chrome called..."
     $existing = Get-Process chrome -ErrorAction SilentlyContinue
-    if (-not $existing) {
-        Start-Process $chromePath -ArgumentList "--user-data-dir=`"$chromeProfileDir`""
+    if ($existing) {
+        Write-Log "Chrome already running (PID: $($existing[0].Id))"
+        return
+    }
+    
+    Write-Log "Launching Chrome from: $chromePath"
+    Write-Log "Profile dir: $chromeProfileDir"
+    
+    if (-not (Test-Path $chromePath)) {
+        Write-Log "ERROR: Chrome not found at $chromePath"
+        return
+    }
+    
+    try {
+        $proc = Start-Process $chromePath -ArgumentList "--user-data-dir=`"$chromeProfileDir`"" -PassThru
+        Write-Log "Chrome started with PID: $($proc.Id)"
         Start-Sleep -Seconds 3
+    } catch {
+        Write-Log "ERROR starting Chrome: $_"
     }
 }
 
