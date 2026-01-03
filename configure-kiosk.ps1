@@ -195,8 +195,8 @@ $escMonitorPath = "C:\ProgramData\msbmc-esc-monitor.ps1"
 
 $escMonitorContent = @'
 
+Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName Microsoft.VisualBasic
 
 Add-Type @"
 using System;
@@ -217,6 +217,86 @@ $escReleased = $true
 
 function Is-ChromeOnlyMode {
     return (Test-Path "C:\ProgramData\msbmc-chrome-only.flag")
+}
+
+function Show-PasswordDialog {
+    param([string]$Message, [string]$Title)
+    
+    $xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="$Title" Height="200" Width="400" 
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="20"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="20"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <TextBlock Grid.Row="0" Text="$Message" TextWrapping="Wrap" FontSize="14"/>
+        <PasswordBox Grid.Row="2" Name="PasswordBox" FontSize="14" Height="30"/>
+        
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Name="OkButton" Content="OK" Width="80" Height="30" Margin="0,0,10,0" IsDefault="True"/>
+            <Button Name="CancelButton" Content="Cancel" Width="80" Height="30" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"@
+    
+    $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
+    $window = [Windows.Markup.XamlReader]::Load($reader)
+    
+    $passwordBox = $window.FindName("PasswordBox")
+    $okButton = $window.FindName("OkButton")
+    $cancelButton = $window.FindName("CancelButton")
+    
+    $okButton.Add_Click({
+        $window.Tag = $passwordBox.Password
+        $window.DialogResult = $true
+        $window.Close()
+    })
+    
+    $cancelButton.Add_Click({
+        $window.DialogResult = $false
+        $window.Close()
+    })
+    
+    $passwordBox.Focus()
+    $result = $window.ShowDialog()
+    
+    if ($result) {
+        return $window.Tag
+    }
+    return $null
+}
+
+function Show-InfoDialog {
+    param([string]$Message, [string]$Title)
+    
+    $xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        Title="$Title" Height="150" Width="400" 
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="20"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <TextBlock Grid.Row="0" Text="$Message" TextWrapping="Wrap" FontSize="14" VerticalAlignment="Center"/>
+        <Button Grid.Row="2" Content="OK" Width="80" Height="30" HorizontalAlignment="Center" IsDefault="True"/>
+    </Grid>
+</Window>
+"@
+    
+    $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
+    $window = [Windows.Markup.XamlReader]::Load($reader)
+    $window.ShowDialog() | Out-Null
 }
 
 while ($true) {
@@ -240,19 +320,21 @@ while ($true) {
             $escCount = 0
             
             if (Is-ChromeOnlyMode) {
-                # In Chrome-only mode: ask password to exit
-                $inputPassword = [Microsoft.VisualBasic.Interaction]::InputBox(
-                    "Enter password to exit Chrome-only mode:",
-                    "MSBMC Maintenance",
-                    ""
-                )
+                # In Chrome-only mode: ask password to exit to maintenance mode
+                $inputPassword = Show-PasswordDialog -Message "Chrome-only mode is active. Enter password to switch to maintenance mode (taskbar and desktop will be visible):" -Title "MSBMC - Exit Chrome-Only Mode"
                 
                 if ($inputPassword -eq $KioskPassword) {
                     & "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Disable
+                    Start-Sleep -Seconds 2
+                    Show-InfoDialog -Message "Maintenance mode enabled. Taskbar and desktop icons are now visible. Press ESC 3x again to return to Chrome-only mode." -Title "MSBMC - Maintenance Mode"
+                } elseif ($inputPassword) {
+                    Show-InfoDialog -Message "Incorrect password. Chrome-only mode remains active." -Title "MSBMC - Access Denied"
                 }
             } else {
                 # In normal mode: enable Chrome-only mode
                 & "C:\ProgramData\msbmc-chrome-only-toggle.ps1" -Enable
+                Start-Sleep -Seconds 2
+                Show-InfoDialog -Message "Chrome-only mode enabled. Only Chrome is visible. Press ESC 3x + password to return to maintenance mode." -Title "MSBMC - Chrome-Only Mode"
             }
         }
     }
