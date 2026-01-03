@@ -122,9 +122,13 @@ objShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hid
     $principal = New-ScheduledTaskPrincipal -UserId "msbmc" -LogonType Interactive -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-
-    Write-Host "[OK] Scheduled task created - resolution will persist after reboot" -ForegroundColor Green
+    try {
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+        Write-Host "[OK] Scheduled task created - resolution will persist after reboot" -ForegroundColor Green
+    } catch {
+        Write-Host "[ERROR] Failed to create scheduled task: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[INFO] Resolution is set for current session but may not persist" -ForegroundColor Yellow
+    }
 } else {
     Write-Host "[OK] Resolution set (running from scheduled task)" -ForegroundColor Green
 }
