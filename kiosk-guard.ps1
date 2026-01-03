@@ -55,6 +55,12 @@ public class KioskGuard {
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
     
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+    
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+    
     // Work area
     [DllImport("user32.dll")]
     public static extern bool SystemParametersInfo(int uiAction, int uiParam, ref RECT pvParam, int fWinIni);
@@ -71,6 +77,7 @@ public class KioskGuard {
     
     public const int SW_HIDE = 0;
     public const int SW_SHOW = 5;
+    public const int SW_RESTORE = 9;
     public const int GWL_STYLE = -16;
     public const int WS_CAPTION = 0x00C00000;
     public const int WS_THICKFRAME = 0x00040000;
@@ -149,10 +156,23 @@ public class KioskGuard {
     
     public static void MakeChromeFullscreen(IntPtr hwnd, int w, int h) {
         if (hwnd == IntPtr.Zero) return;
+        
+        // Restore if minimized
+        if (IsIconic(hwnd)) {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+        
+        // Remove borders
         int style = GetWindowLong(hwnd, GWL_STYLE);
         SetWindowLong(hwnd, GWL_STYLE, style & ~WS_CAPTION & ~WS_THICKFRAME);
+        
+        // Position fullscreen and topmost
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, w, h, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
         SetForegroundWindow(hwnd);
+    }
+    
+    public static bool IsMinimized(IntPtr hwnd) {
+        return hwnd != IntPtr.Zero && IsIconic(hwnd);
     }
     
     public static void MakeChromeNormal(IntPtr hwnd) {
@@ -169,6 +189,20 @@ $taskbarHeight = 40
 $chromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 $chromeProfileDir = "D:\ChromeProfile"
 $flagFile = "C:\ProgramData\msbmc-chrome-only.flag"
+$logFile = "C:\MSBMC\Logs\kiosk-guard.log"
+
+# Ensure log directory exists
+$logDir = Split-Path $logFile -Parent
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+}
+
+function Write-Log {
+    param([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "[$timestamp] $Message" | Add-Content $logFile
+    Write-Host "[$timestamp] $Message"
+}
 
 # State
 $lastMode = $null
@@ -191,28 +225,88 @@ function Get-ChromeWindow {
     return [IntPtr]::Zero
 }
 
-# Start keyboard hook (always running, but blocking is conditional)
-[KioskGuard]::StartHook()
-Write-Host "[KIOSK-GUARD] Started - monitoring mode changes" -ForegroundColor Green
+function Wait-ForDesktop {
+    Write-Log "Waiting for desktop to be ready..."
+    $maxWait = 60
+    $waited = 0
+    while ($waited -lt $maxWait) {
+        $explorer = Get-Process explorer -ErrorAction SilentlyContinue
+        $taskbar = [KioskGuard]::FindWindow("Shell_TrayWnd", $null)
+        if ($explorer -and $taskbar -ne [IntPtr]::Zero) {
+            Write-Log "Desktop ready (explorer running, taskbar found)"
+            Start-Sleep -Seconds 3  # Extra wait for stability
+            return $true
+        }
+        Start-Sleep -Seconds 1
+        $waited++
+    }
+    Write-Log "Timeout waiting for desktop"
+    return $false
+}
 
-# Main loop
+# ============================================================================
+# STARTUP
+# ============================================================================
+Write-Log "KioskGuard starting..."
+
+# Wait for desktop to be fully loaded
+Wait-ForDesktop
+
+# AUTO-CREATE flag file at boot (default to chrome-only mode)
+if (-not (Test-Path $flagFile)) {
+    Write-Log "Flag file not found - creating (default chrome-only mode)"
+    Set-Content -Path $flagFile -Value "enabled" -Force
+}
+
+# Start keyboard hook
+[KioskGuard]::StartHook()
+Write-Log "Keyboard hook installed"
+
+# Initial setup - force chrome-only mode
+Write-Log "Applying initial chrome-only lockdown..."
+[KioskGuard]::SetBlockWinKey($true)
+[KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
+[KioskGuard]::HideTaskbar()
+Start-Sleep -Seconds 1
+[KioskGuard]::HideTaskbar()  # Double-tap to ensure hidden
+
+# Start Chrome if not running
+if (-not (Get-Process chrome -ErrorAction SilentlyContinue)) {
+    Write-Log "Starting Chrome..."
+    Start-Chrome
+    Start-Sleep -Seconds 3
+}
+
+# Make Chrome fullscreen
+$hwnd = Get-ChromeWindow
+if ($hwnd -ne [IntPtr]::Zero) {
+    Write-Log "Making Chrome fullscreen..."
+    [KioskGuard]::MakeChromeFullscreen($hwnd, $screenWidth, $screenHeight)
+}
+
+$lastMode = $true  # Start in chrome-only mode
+Write-Log "Initial setup complete - entering main loop"
+
+# ============================================================================
+# MAIN LOOP
+# ============================================================================
 while ($true) {
     $chromeOnly = Is-ChromeOnlyMode
     
     # Detect mode change
     if ($chromeOnly -ne $lastMode) {
         if ($chromeOnly) {
-            Write-Host "[KIOSK-GUARD] >>> Chrome-only mode ENABLED <<<" -ForegroundColor Cyan
+            Write-Log ">>> Chrome-only mode ENABLED <<<"
             [KioskGuard]::SetBlockWinKey($true)
             [KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
             [KioskGuard]::HideTaskbar()
         } else {
-            Write-Host "[KIOSK-GUARD] >>> Maintenance mode ENABLED <<<" -ForegroundColor Yellow
+            Write-Log ">>> Maintenance mode ENABLED <<<"
             [KioskGuard]::SetBlockWinKey($false)
             [KioskGuard]::ShowTaskbar()
             [KioskGuard]::RestoreWorkArea($screenWidth, $screenHeight, $taskbarHeight)
             
-            # Make Chrome normal window (not topmost, not fullscreen)
+            # Make Chrome normal window
             $hwnd = Get-ChromeWindow
             if ($hwnd -ne [IntPtr]::Zero) {
                 [KioskGuard]::MakeChromeNormal($hwnd)
@@ -223,17 +317,22 @@ while ($true) {
     
     # Chrome-only mode: enforce lockdown continuously
     if ($chromeOnly) {
-        # Keep taskbar hidden
+        # Keep taskbar hidden and work area full
         [KioskGuard]::HideTaskbar()
+        [KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
         
         # Check Chrome
         $hwnd = Get-ChromeWindow
         if ($hwnd -ne [IntPtr]::Zero) {
+            # Check if minimized and log
+            if ([KioskGuard]::IsMinimized($hwnd)) {
+                Write-Log "Chrome was minimized - restoring..."
+            }
             # Chrome running - keep it fullscreen and topmost
             [KioskGuard]::MakeChromeFullscreen($hwnd, $screenWidth, $screenHeight)
         } else {
             # Chrome not running - restart it
-            Write-Host "[KIOSK-GUARD] Chrome closed - restarting..." -ForegroundColor Yellow
+            Write-Log "Chrome closed - restarting..."
             Start-Chrome
             Start-Sleep -Seconds 2
             $hwnd = Get-ChromeWindow
@@ -245,8 +344,4 @@ while ($true) {
     
     Start-Sleep -Seconds 2
 }
-        }
-    }
-    
-    Start-Sleep -Seconds 2
-}
+
