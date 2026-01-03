@@ -120,17 +120,26 @@ public class Taskbar {
         New-Item -Path $explorerPolicyPath -Force | Out-Null
     }
     Set-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Value 1 -Force
+    
+    # Also disable via System policy for immediate effect
+    $systemPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
+    if (-not (Test-Path $systemPolicyPath)) {
+        New-Item -Path $systemPolicyPath -Force | Out-Null
+    }
+    Set-ItemProperty -Path $systemPolicyPath -Name "DisableLockWorkstation" -Value 1 -Force
+    
     Write-Host "   [OK] Windows key disabled" -ForegroundColor Green
     
-    # Start Chrome MAXIMIZED (not kiosk/fullscreen - we want nav bar visible)
+    # Start Chrome WITHOUT maximize (we'll position it manually to cover full screen)
     Write-Host "[INFO] Starting Chrome with profile: $ChromeProfileDir" -ForegroundColor Cyan
     
     # Check if Chrome is already running - don't start multiple instances
     $existingChrome = Get-Process chrome -ErrorAction SilentlyContinue
     if (-not $existingChrome) {
-        $argString = "--start-maximized --user-data-dir=`"$ChromeProfileDir`""
+        # Start Chrome in windowed mode (no --start-maximized)
+        $argString = "--user-data-dir=`"$ChromeProfileDir`" --window-size=1920,1080 --window-position=0,0"
         Start-Process $ChromePath -ArgumentList $argString
-        Start-Sleep -Seconds 4
+        Start-Sleep -Seconds 5
         
         # Reposition Chrome to cover entire screen including taskbar space
         if (-not ([System.Management.Automation.PSTypeName]'WindowPosition').Type) {
@@ -139,24 +148,30 @@ using System;
 using System.Runtime.InteropServices;
 public class WindowPosition {
     [DllImport("user32.dll")]
-    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    
-    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-    public const uint SWP_SHOWWINDOW = 0x0040;
+    public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    public const int SW_RESTORE = 9;
 }
 "@
         }
         
-        # Get Chrome window and resize to cover full screen
+        # Get Chrome window and force resize to exact full screen dimensions
+        Start-Sleep -Seconds 2
         $chromeWindows = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
         if ($chromeWindows) {
             $mainWindow = $chromeWindows[0].MainWindowHandle
-            # Set window to 0,0 with full screen dimensions (1920x1080)
-            # This covers taskbar space since taskbar is hidden
-            [WindowPosition]::SetWindowPos($mainWindow, [WindowPosition]::HWND_TOPMOST, 0, 0, 1920, 1080, [WindowPosition]::SWP_SHOWWINDOW) | Out-Null
+            # First restore to windowed mode (in case it's maximized)
+            [WindowPosition]::ShowWindow($mainWindow, [WindowPosition]::SW_RESTORE) | Out-Null
+            Start-Sleep -Milliseconds 500
+            # Then move and resize to exact dimensions covering taskbar space
+            [WindowPosition]::MoveWindow($mainWindow, 0, 0, 1920, 1080, $true) | Out-Null
+            [WindowPosition]::SetForegroundWindow($mainWindow) | Out-Null
         }
         
-        Write-Host "   [OK] Chrome started and positioned to cover full screen" -ForegroundColor Green
+        Write-Host "   [OK] Chrome positioned to cover full screen (1920x1080 at 0,0)" -ForegroundColor Green
     } else {
         Write-Host "   [SKIP] Chrome already running" -ForegroundColor Yellow
     }
@@ -171,8 +186,14 @@ public class WindowPosition {
     $explorerPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
     if (Test-Path $explorerPolicyPath) {
         Remove-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Force -ErrorAction SilentlyContinue
-        Write-Host "   [OK] Windows key re-enabled" -ForegroundColor Green
     }
+    
+    $systemPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
+    if (Test-Path $systemPolicyPath) {
+        Remove-ItemProperty -Path $systemPolicyPath -Name "DisableLockWorkstation" -Force -ErrorAction SilentlyContinue
+    }
+    
+    Write-Host "   [OK] Windows key re-enabled" -ForegroundColor Green
     
     # Disable Chrome Watchdog
     Disable-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue | Out-Null
