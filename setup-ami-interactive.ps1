@@ -1070,6 +1070,50 @@ if ((Test-Path $profileDir) -and (Test-Path $markerFile)) {
 
     
 
+    # Create desktop shortcut for Chrome with ChromeProfile
+
+    Write-Host ""
+
+    Write-Host "Creating desktop shortcut for Chrome with ChromeProfile..." -ForegroundColor Yellow
+
+    try {
+
+        $desktopPath = [Environment]::GetFolderPath("Desktop")
+
+        $shortcutPath = Join-Path $desktopPath "Chrome (MSBMC Profile).lnk"
+
+        
+
+        $WScriptShell = New-Object -ComObject WScript.Shell
+
+        $shortcut = $WScriptShell.CreateShortcut($shortcutPath)
+
+        $shortcut.TargetPath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+
+        $shortcut.Arguments = "--user-data-dir=`"$profileDir`""
+
+        $shortcut.WorkingDirectory = "$env:USERPROFILE"
+
+        $shortcut.IconLocation = "C:\Program Files\Google\Chrome\Application\chrome.exe,0"
+
+        $shortcut.Description = "Chrome with MSBMC Profile (includes VPN extensions)"
+
+        $shortcut.Save()
+
+        
+
+        Write-Host "[OK] Desktop shortcut created: Chrome (MSBMC Profile).lnk" -ForegroundColor Green
+
+        Write-Host "     Use this shortcut to access Chrome with VPN extensions!" -ForegroundColor Cyan
+
+    } catch {
+
+        Write-Host "[WARN] Failed to create desktop shortcut: $_" -ForegroundColor Yellow
+
+    }
+
+    
+
 } else {
 
     Write-Host "[ERROR] Chrome profile not found!" -ForegroundColor Red
