@@ -267,40 +267,43 @@ Write-Log "KioskGuard starting..."
 # Small delay for system stability at boot
 Start-Sleep -Seconds 5
 
-# AUTO-CREATE flag file at boot (default to chrome-only mode)
-if (-not (Test-Path $flagFile)) {
-    Write-Log "Flag file not found - creating (default chrome-only mode)"
-    Set-Content -Path $flagFile -Value "enabled" -Force
-}
+# DON'T auto-create flag file - let user enable chrome-only mode via ESC 3x
+# Flag file is managed by toggle script only
 
 # Start keyboard hook
 [KioskGuard]::StartHook()
 Write-Log "Keyboard hook installed"
 
-# Start Chrome FIRST (before applying restrictions)
-if (-not (Get-Process chrome -ErrorAction SilentlyContinue)) {
-    Write-Log "Starting Chrome..."
-    Start-Chrome
-    Start-Sleep -Seconds 5
-}
-
-# Now apply lockdown
-Write-Log "Applying chrome-only lockdown..."
-[KioskGuard]::SetBlockWinKey($true)
-[KioskGuard]::HideTaskbar()
-Start-Sleep -Seconds 1
-[KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
-
-# Make Chrome fullscreen
-$hwnd = Get-ChromeWindow
-if ($hwnd -ne [IntPtr]::Zero) {
-    Write-Log "Making Chrome fullscreen..."
-    [KioskGuard]::MakeChromeFullscreen($hwnd, $screenWidth, $screenHeight)
+# Check initial mode
+$chromeOnly = Is-ChromeOnlyMode
+if ($chromeOnly) {
+    Write-Log "Chrome-only mode active - applying lockdown..."
+    [KioskGuard]::SetBlockWinKey($true)
+    [KioskGuard]::HideTaskbar()
+    Start-Sleep -Seconds 1
+    [KioskGuard]::SetFullWorkArea($screenWidth, $screenHeight)
+    
+    # Start Chrome if not running
+    if (-not (Get-Process chrome -ErrorAction SilentlyContinue)) {
+        Write-Log "Starting Chrome..."
+        Start-Chrome
+        Start-Sleep -Seconds 5
+    }
+    
+    # Make Chrome fullscreen
+    $hwnd = Get-ChromeWindow
+    if ($hwnd -ne [IntPtr]::Zero) {
+        Write-Log "Making Chrome fullscreen..."
+        [KioskGuard]::MakeChromeFullscreen($hwnd, $screenWidth, $screenHeight)
+    } else {
+        Write-Log "WARNING: Chrome window not found"
+    }
 } else {
-    Write-Log "WARNING: Chrome window not found"
+    Write-Log "Maintenance mode - normal operation"
+    [KioskGuard]::SetBlockWinKey($false)
 }
 
-$lastMode = $true  # Start in chrome-only mode
+$lastMode = $chromeOnly
 Write-Log "Initial setup complete - entering main loop"
 
 # ============================================================================
