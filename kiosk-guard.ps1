@@ -189,19 +189,17 @@ $taskbarHeight = 40
 $chromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
 $chromeProfileDir = "D:\ChromeProfile"
 $flagFile = "C:\ProgramData\msbmc-chrome-only.flag"
-$logFile = "C:\MSBMC\Logs\kiosk-guard.log"
+$logFile = "$env:USERPROFILE\kiosk-guard.log"
 
-# Ensure log directory exists
-$logDir = Split-Path $logFile -Parent
-if (-not (Test-Path $logDir)) {
-    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-}
-
+# Ensure log works (use user profile, not system folder)
 function Write-Log {
     param([string]$Message)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "[$timestamp] $Message" | Add-Content $logFile
-    Write-Host "[$timestamp] $Message"
+    $line = "[$timestamp] $Message"
+    Write-Host $line
+    try {
+        $line | Out-File -FilePath $logFile -Append -ErrorAction SilentlyContinue
+    } catch {}
 }
 
 # State
