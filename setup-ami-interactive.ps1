@@ -487,6 +487,31 @@ if ((Test-Path $profileDir) -and (Test-Path $markerFile)) {
         $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
     }
     
+    # Create desktop shortcut for Chrome with persistent profile
+    Write-Host ""
+    Write-Host "Creating desktop shortcut..." -ForegroundColor Yellow
+    try {
+        $desktopPath = [Environment]::GetFolderPath("Desktop")
+        $shortcutPath = Join-Path $desktopPath "Chrome (MSBMC Profile).lnk"
+        
+        if (-not (Test-Path $shortcutPath)) {
+            $WScriptShell = New-Object -ComObject WScript.Shell
+            $shortcut = $WScriptShell.CreateShortcut($shortcutPath)
+            $shortcut.TargetPath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+            $shortcut.Arguments = "--user-data-dir=`"$profileDir`""
+            $shortcut.IconLocation = "C:\Program Files\Google\Chrome\Application\chrome.exe,0"
+            $shortcut.Description = "Chrome with MSBMC persistent profile"
+            $shortcut.Save()
+            
+            Write-Host "[OK] Desktop shortcut created" -ForegroundColor Green
+            Write-Host "    Use this shortcut to always launch Chrome with persistent profile" -ForegroundColor Cyan
+        } else {
+            Write-Host "[OK] Desktop shortcut already exists" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "[WARN] Could not create desktop shortcut: $_" -ForegroundColor Yellow
+    }
+    
 } else {
     Write-Host "[ERROR] Chrome profile not found!" -ForegroundColor Red
     Write-Host ""
