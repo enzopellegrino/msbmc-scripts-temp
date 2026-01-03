@@ -99,19 +99,14 @@ function Clear-ChromeRestoreData {
 
 # Function to start Chrome maximized
 function Start-ChromeMaximized {
-    Start-Process $chromePath -ArgumentList @(
-        "--start-maximized",
-        "--user-data-dir=$profileDir",
-        "--disable-session-crashed-bubble",
-        "--disable-infobars",
-        "--no-first-run",
-        "--disable-features=InfiniteSessionRestore,SessionRestore",
-        "--hide-crash-restore-bubble",
-        "--disable-background-mode",
-        "--restore-last-session=false",
-        "--no-default-browser-check"
-    )
-    Start-Sleep -Seconds 2
+    $argString = "--start-maximized --user-data-dir=`"$profileDir`""
+    Start-Process $chromePath -ArgumentList $argString
+    Start-Sleep -Seconds 3
+}
+
+# Function to check if Chrome-only mode is active
+function Is-ChromeOnlyMode {
+    return (Test-Path "C:\ProgramData\msbmc-chrome-only.flag")
 }
 
 # Function to ensure Chrome window is maximized
@@ -145,10 +140,17 @@ while ($true) {
     $chromeProc = Get-Process chrome -ErrorAction SilentlyContinue
     
     if ($chromeProc) {
-        # Chrome running - ensure it's maximized
+        # Chrome running - ensure it's maximized and in foreground
         Ensure-ChromeMaximized
+    } else {
+        # Chrome NOT running
+        # Only restart if Chrome-only mode is active
+        if (Is-ChromeOnlyMode) {
+            Write-Host "[WATCHDOG] Chrome closed in Chrome-only mode - restarting..." -ForegroundColor Yellow
+            Start-ChromeMaximized
+        }
+        # In maintenance mode, do nothing - let user work freely
     }
-    # DO NOT start Chrome automatically - let configure-kiosk.ps1 handle that
     
     Start-Sleep -Seconds 3
 }
