@@ -57,58 +57,58 @@ $scriptsDir = "C:\MSBMC\Scripts"
 # Helper Functions - Check BASE AMI Prerequisites (from Packer)
 # =============================================================================
 function Test-BaseAMIPrerequisites {
-    $errors = @()
+    $missingItems = @()
     
     # Check Chrome installed
     $chromePath = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
     if (-not (Test-Path $chromePath)) {
-        $errors += "Chrome not installed at $chromePath"
+        $missingItems += "Chrome not installed at $chromePath"
     }
     
     # Check ChromeDriver
     $chromeDriverPath = "C:\tools\chromedriver\chromedriver.exe"
     if (-not (Test-Path $chromeDriverPath)) {
-        $errors += "ChromeDriver not found at $chromeDriverPath"
+        $missingItems += "ChromeDriver not found at $chromeDriverPath"
     }
     
     # Check FFmpeg
     $ffmpegPath = "C:\ProgramData\chocolatey\bin\ffmpeg.exe"
     if (-not (Test-Path $ffmpegPath)) {
-        $errors += "FFmpeg not installed"
+        $missingItems += "FFmpeg not installed"
     }
     
     # Check Python
     $pythonPath = "C:\Python312\python.exe"
     if (-not (Test-Path $pythonPath)) {
-        $errors += "Python not installed at $pythonPath"
+        $missingItems += "Python not installed at $pythonPath"
     }
     
     # Check TightVNC
     $vncPath = "C:\Program Files\TightVNC\tvnserver.exe"
     if (-not (Test-Path $vncPath)) {
-        $errors += "TightVNC not installed"
+        $missingItems += "TightVNC not installed"
     }
     
     # Check noVNC directory
     $novncPath = "C:\noVNC"
     if (-not (Test-Path $novncPath)) {
-        $errors += "noVNC not installed at $novncPath"
+        $missingItems += "noVNC not installed at $novncPath"
     }
     
     # Check MSBMC scripts directory
     if (-not (Test-Path $scriptsDir)) {
-        $errors += "MSBMC Scripts directory not found at $scriptsDir"
+        $missingItems += "MSBMC Scripts directory not found at $scriptsDir"
     }
     
     # Check msbmc user exists
     $msbmcUser = Get-LocalUser -Name "msbmc" -ErrorAction SilentlyContinue
     if (-not $msbmcUser) {
-        $errors += "User 'msbmc' does not exist"
+        $missingItems += "User 'msbmc' does not exist"
     }
     
     return @{
-        Success = ($errors.Count -eq 0)
-        Errors = $errors
+        Success = ($missingItems.Count -eq 0)
+        MissingItems = $missingItems
     }
 }
 
@@ -225,7 +225,7 @@ if (-not $baseCheck.Success) {
     Write-Host "========================================" -ForegroundColor Red
     Write-Host ""
     Write-Host "The following prerequisites are missing:" -ForegroundColor Yellow
-    foreach ($err in $baseCheck.Errors) {
+    foreach ($err in $baseCheck.MissingItems) {
         Write-Host "  [X] $err" -ForegroundColor Red
     }
     Write-Host ""
