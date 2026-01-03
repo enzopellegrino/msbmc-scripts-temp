@@ -341,9 +341,14 @@ if ($resolutionDone) {
     if (Test-Path $resolutionScript) {
         Write-Host "Setting resolution to 1920x1080..." -ForegroundColor Yellow
         Write-Host "This will create a scheduled task for persistent resolution." -ForegroundColor Cyan
+        Write-Host "UAC prompt will appear - click Yes to continue." -ForegroundColor Yellow
         Write-Host ""
         
-        & $resolutionScript
+        $process = Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$resolutionScript`"" -Verb RunAs -Wait -PassThru
+        
+        if ($process.ExitCode -ne 0) {
+            Write-Host "[ERROR] Resolution script failed with exit code: $($process.ExitCode)" -ForegroundColor Red
+        }
         
         Write-Host ""
         Write-Host "Verifying resolution..." -ForegroundColor Yellow
