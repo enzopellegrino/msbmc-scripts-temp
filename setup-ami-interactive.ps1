@@ -125,8 +125,8 @@ function Test-ResolutionConfigured {
     $task = Get-ScheduledTask -TaskName "MSBMC-SetResolution" -ErrorAction SilentlyContinue
     if (-not $task) { return $false }
     
-    # Check if task is configured for msbmc user
-    if ($task.Principal.UserId -ne "msbmc") { return $false }
+    # Check if task is configured for msbmc user (allow domain\msbmc or just msbmc)
+    if ($task.Principal.UserId -notlike "*msbmc*") { return $false }
     
     # Check if VBS wrapper exists
     $vbsWrapper = "C:\ProgramData\msbmc-resolution-launcher.vbs"
