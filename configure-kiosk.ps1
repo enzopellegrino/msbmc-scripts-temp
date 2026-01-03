@@ -109,24 +109,8 @@ public class Taskbar {
     # Refresh shell to apply icon hide
     [Shell]::SHChangeNotify(0x8000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
     
-    # PERSISTENT taskbar auto-hide via registry
-    $taskbarRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
-    if (Test-Path $taskbarRegPath) {
-        $settings = Get-ItemProperty -Path $taskbarRegPath -Name "Settings" -ErrorAction SilentlyContinue
-        if ($settings) {
-            $bytes = $settings.Settings
-            # Byte 8: 0x03 = auto-hide enabled (0x02 causes issues on some systems)
-            $bytes[8] = 0x03
-            Set-ItemProperty -Path $taskbarRegPath -Name "Settings" -Value $bytes -Force
-        }
-    }
-    
-    # Also mark taskbar as small icons (takes less space if it appears)
-    Set-ItemProperty -Path $desktopRegPath -Name "TaskbarSmallIcons" -Value 1 -Force -ErrorAction SilentlyContinue
-    
+    # Hide taskbar immediately via API (solo per la sessione corrente)
     Start-Sleep -Seconds 1
-    
-    # Hide taskbar immediately via API (temporary until reboot, then registry takes over)
     [Taskbar]::Hide()
     
     # Disable Windows key to prevent Start menu access
@@ -223,19 +207,7 @@ public class WindowStyle {
         Remove-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Force -ErrorAction SilentlyContinue
     }
     
-    # Disable taskbar auto-hide
-    $taskbarRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
-    if (Test-Path $taskbarRegPath) {
-        $settings = Get-ItemProperty -Path $taskbarRegPath -Name "Settings" -ErrorAction SilentlyContinue
-        if ($settings) {
-            $bytes = $settings.Settings
-            # Byte 8: 0x02 = always visible
-            $bytes[8] = 0x02
-            Set-ItemProperty -Path $taskbarRegPath -Name "Settings" -Value $bytes -Force
-        }
-    }
-    
-    Write-Host "   [OK] Windows key re-enabled + taskbar restored" -ForegroundColor Green
+    Write-Host "   [OK] Windows key re-enabled" -ForegroundColor Green
     
     # Disable Chrome Watchdog
     Disable-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue | Out-Null
