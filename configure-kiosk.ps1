@@ -121,14 +121,11 @@ public class Taskbar {
     }
     Set-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Value 1 -Force
     
-    # Also disable via System policy for immediate effect
-    $systemPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
-    if (-not (Test-Path $systemPolicyPath)) {
-        New-Item -Path $systemPolicyPath -Force | Out-Null
-    }
-    Set-ItemProperty -Path $systemPolicyPath -Name "DisableLockWorkstation" -Value 1 -Force
+    # Kill and restart explorer to apply policy immediately
+    Stop-Process -Name "explorer" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
     
-    Write-Host "   [OK] Windows key disabled" -ForegroundColor Green
+    Write-Host "   [OK] Windows key disabled (explorer restarted)" -ForegroundColor Green
     
     # Start Chrome WITHOUT maximize (we'll position it manually to cover full screen)
     Write-Host "[INFO] Starting Chrome with profile: $ChromeProfileDir" -ForegroundColor Cyan
@@ -136,42 +133,53 @@ public class Taskbar {
     # Check if Chrome is already running - don't start multiple instances
     $existingChrome = Get-Process chrome -ErrorAction SilentlyContinue
     if (-not $existingChrome) {
-        # Start Chrome in windowed mode (no --start-maximized)
-        $argString = "--user-data-dir=`"$ChromeProfileDir`" --window-size=1920,1080 --window-position=0,0"
+        # Start Chrome in windowed mode with slightly larger dimensions to cover borders
+        # Position at -8,-8 to hide window borders/title bar edges
+        $argString = "--user-data-dir=`"$ChromeProfileDir`" --window-size=1936,1096 --window-position=-8,-8"
         Start-Process $ChromePath -ArgumentList $argString
         Start-Sleep -Seconds 5
         
-        # Reposition Chrome to cover entire screen including taskbar space
-        if (-not ([System.Management.Automation.PSTypeName]'WindowPosition').Type) {
+        # Remove window borders using SetWindowLong to make it borderless
+        if (-not ([System.Management.Automation.PSTypeName]'WindowStyle').Type) {
             Add-Type @"
 using System;
 using System.Runtime.InteropServices;
-public class WindowPosition {
+public class WindowStyle {
+    [DllImport("user32.dll")]
+    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll")]
+    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll")]
     public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")]
-    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    public const int SW_RESTORE = 9;
+    
+    public const int GWL_STYLE = -16;
+    public const int WS_CAPTION = 0x00C00000;
+    public const int WS_THICKFRAME = 0x00040000;
 }
 "@
         }
         
-        # Get Chrome window and force resize to exact full screen dimensions
+        # Get Chrome window and make it borderless + resize to exact full screen
         Start-Sleep -Seconds 2
         $chromeWindows = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
         if ($chromeWindows) {
             $mainWindow = $chromeWindows[0].MainWindowHandle
-            # First restore to windowed mode (in case it's maximized)
-            [WindowPosition]::ShowWindow($mainWindow, [WindowPosition]::SW_RESTORE) | Out-Null
+            
+            # Remove window caption and frame (borders)
+            $currentStyle = [WindowStyle]::GetWindowLong($mainWindow, [WindowStyle]::GWL_STYLE)
+            $newStyle = $currentStyle -band (-bnot [WindowStyle]::WS_CAPTION) -band (-bnot [WindowStyle]::WS_THICKFRAME)
+            [WindowStyle]::SetWindowLong($mainWindow, [WindowStyle]::GWL_STYLE, $newStyle) | Out-Null
+            
             Start-Sleep -Milliseconds 500
-            # Then move and resize to exact dimensions covering taskbar space
-            [WindowPosition]::MoveWindow($mainWindow, 0, 0, 1920, 1080, $true) | Out-Null
-            [WindowPosition]::SetForegroundWindow($mainWindow) | Out-Null
+            
+            # Now move to exact position covering entire screen
+            [WindowStyle]::MoveWindow($mainWindow, 0, 0, 1920, 1080, $true) | Out-Null
+            [WindowStyle]::SetForegroundWindow($mainWindow) | Out-Null
         }
         
-        Write-Host "   [OK] Chrome positioned to cover full screen (1920x1080 at 0,0)" -ForegroundColor Green
+        Write-Host "   [OK] Chrome borderless and positioned to cover full screen" -ForegroundColor Green
     } else {
         Write-Host "   [SKIP] Chrome already running" -ForegroundColor Yellow
     }
@@ -188,10 +196,9 @@ public class WindowPosition {
         Remove-ItemProperty -Path $explorerPolicyPath -Name "NoWinKeys" -Force -ErrorAction SilentlyContinue
     }
     
-    $systemPolicyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
-    if (Test-Path $systemPolicyPath) {
-        Remove-ItemProperty -Path $systemPolicyPath -Name "DisableLockWorkstation" -Force -ErrorAction SilentlyContinue
-    }
+    # Restart explorer to apply
+    Stop-Process -Name "explorer" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
     
     Write-Host "   [OK] Windows key re-enabled" -ForegroundColor Green
     
