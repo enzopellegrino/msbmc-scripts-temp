@@ -225,8 +225,8 @@ if (-not $baseCheck.Success) {
     Write-Host "========================================" -ForegroundColor Red
     Write-Host ""
     Write-Host "The following prerequisites are missing:" -ForegroundColor Yellow
-    foreach ($err in $baseCheck.MissingItems) {
-        Write-Host "  [X] $err" -ForegroundColor Red
+    foreach ($item in $baseCheck.MissingItems) {
+        Write-Host "  [X] $item" -ForegroundColor Red
     }
     Write-Host ""
     Write-Host "This means the Packer build did not complete successfully." -ForegroundColor Yellow
