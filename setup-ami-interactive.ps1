@@ -66,7 +66,7 @@ function Test-BaseAMIPrerequisites {
     }
     
     # Check ChromeDriver
-    $chromeDriverPath = "C:\tools\chromedriver\chromedriver.exe"
+    $chromeDriverPath = "C:\ProgramData\chocolatey\bin\chromedriver.exe"
     if (-not (Test-Path $chromeDriverPath)) {
         $missingItems += "ChromeDriver not found at $chromeDriverPath"
     }
@@ -78,9 +78,9 @@ function Test-BaseAMIPrerequisites {
     }
     
     # Check Python
-    $pythonPath = "C:\Python312\python.exe"
-    if (-not (Test-Path $pythonPath)) {
-        $missingItems += "Python not installed at $pythonPath"
+    $pythonPath = (Get-Command python -ErrorAction SilentlyContinue).Source
+    if (-not $pythonPath) {
+        $missingItems += "Python not found in PATH"
     }
     
     # Check TightVNC
