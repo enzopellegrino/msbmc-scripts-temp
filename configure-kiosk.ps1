@@ -61,24 +61,17 @@ if ($Enable) {
     # Enable Chrome Watchdog (mantiene Chrome sempre attivo e in primo piano)
     Enable-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue | Out-Null
     
-    # Hide taskbar using Windows API
-    if (-not ([System.Management.Automation.PSTypeName]'Taskbar').Type) {
-        Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class Taskbar {
-    [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string className, string windowName);
-    [DllImport("user32.dll")]
-    public static extern int ShowWindow(IntPtr hwnd, int command);
-    public static void Hide() {
-        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
-        ShowWindow(hwnd, 0);  // SW_HIDE = 0
+    # Hide taskbar via registry (più affidabile che API)
+    $taskbarRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
+    if (Test-Path $taskbarRegPath) {
+        $settings = Get-ItemProperty -Path $taskbarRegPath -Name "Settings"
+        $bytes = $settings.Settings
+        # Byte 8: 0x02 = auto-hide enabled, 0x00 = disabled
+        if ($bytes[8] -ne 0x02) {
+            $bytes[8] = 0x02
+            Set-ItemProperty -Path $taskbarRegPath -Name "Settings" -Value $bytes -Force
+        }
     }
-}
-"@
-    }
-    [Taskbar]::Hide()
     
     # Hide desktop icons via registry
     $desktopRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
@@ -87,16 +80,36 @@ public class Taskbar {
     }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 1 -Force
     
-    # Refresh explorer to apply desktop icons hide
+    # Refresh explorer to apply changes (NON killare completamente)
     Stop-Process -Name "explorer" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    Start-Process "C:\Windows\explorer.exe"
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 3
     
-    # Start Chrome MAXIMIZED (not fullscreen - si vedono barra titolo e controlli)
+    # Start Chrome MAXIMIZED (not fullscreen)
     $chromeArgs = "--start-maximized", "--user-data-dir=$ChromeProfileDir", "--disable-session-crashed-bubble", "--disable-infobars", "--no-first-run", "https://espn.com"
-    Start-Process $ChromePath -ArgumentList $chromeArgs
-    Start-Sleep -Seconds 2
+    $chromeProcess = Start-Process $ChromePath -ArgumentList $chromeArgs -PassThru
+    Start-Sleep -Seconds 4
+    
+    # Force Chrome to foreground using Windows API
+    if (-not ([System.Management.Automation.PSTypeName]'WindowHelper').Type) {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WindowHelper {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}
+"@
+    }
+    
+    # Get Chrome main window and bring to front
+    $chromeWindows = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
+    if ($chromeWindows) {
+        $mainWindow = $chromeWindows[0].MainWindowHandle
+        [WindowHelper]::ShowWindow($mainWindow, 3)  # SW_MAXIMIZE
+        [WindowHelper]::SetForegroundWindow($mainWindow)
+    }
     
     # Start watchdog immediately to keep Chrome on top
     Start-ScheduledTask -TaskName "MSBMC-ChromeWatchdog" -ErrorAction SilentlyContinue
@@ -120,33 +133,25 @@ public class Taskbar {
     }
     Set-ItemProperty -Path $desktopRegPath -Name "HideIcons" -Value 0 -Force
     
-    # Show taskbar using Windows API
-    if (-not ([System.Management.Automation.PSTypeName]'TaskbarShow').Type) {
-        Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class TaskbarShow {
-    [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string className, string windowName);
-    [DllImport("user32.dll")]
-    public static extern int ShowWindow(IntPtr hwnd, int command);
-    public static void Show() {
-        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
-        ShowWindow(hwnd, 1);  // SW_SHOWNORMAL = 1
+    # Show taskbar via registry
+    $taskbarRegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StuckRects3"
+    if (Test-Path $taskbarRegPath) {
+        $settings = Get-ItemProperty -Path $taskbarRegPath -Name "Settings"
+        $bytes = $settings.Settings
+        # Byte 8: 0x02 = auto-hide, 0x00 = always visible
+        if ($bytes[8] -ne 0x00) {
+            $bytes[8] = 0x00
+            Set-ItemProperty -Path $taskbarRegPath -Name "Settings" -Value $bytes -Force
+        }
     }
-}
-"@
-    }
-    [TaskbarShow]::Show()
     
     # Kill Chrome
     Stop-Process -Name "chrome" -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
     
-    # Refresh explorer to show desktop icons
+    # Refresh explorer to apply changes
     Stop-Process -Name "explorer" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
-    Start-Process "C:\Windows\explorer.exe"
+    Start-Sleep -Seconds 2
     
     Write-Host "[CHROME-ONLY] Normal mode restored." -ForegroundColor Green
     
