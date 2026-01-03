@@ -114,15 +114,12 @@ public class Taskbar {
     # Hide taskbar
     [Taskbar]::Hide()
     
-    # Start Chrome MAXIMIZED
+    # Start Chrome MAXIMIZED with EXACT same args as desktop shortcut
+    # IMPORTANT: Use simple args like shortcut to preserve extensions
+    Write-Host "[INFO] Starting Chrome with profile: $ChromeProfileDir" -ForegroundColor Cyan
     $chromeArgs = @(
         "--start-maximized"
-        "--user-data-dir=$ChromeProfileDir"
-        "--disable-session-crashed-bubble"
-        "--disable-infobars"
-        "--no-first-run"
-        "--disable-background-mode"
-        "https://espn.com"
+        "--user-data-dir=`"$ChromeProfileDir`""
     )
     Start-Process $ChromePath -ArgumentList $chromeArgs
     
