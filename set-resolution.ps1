@@ -8,16 +8,6 @@ param(
     [switch]$FromTask  # When called from scheduled task, only set resolution
 )
 
-# Self-elevate if not running as Administrator
-$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-$isAdmin = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-
-if (-not $isAdmin -and -not $FromTask) {
-    Write-Host "Elevating to Administrator..." -ForegroundColor Yellow
-    Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -FromTask" -Verb RunAs -Wait
-    exit
-}
-
 Write-Host "Setting display resolution to 1920x1080..." -ForegroundColor Cyan
 
 try {
