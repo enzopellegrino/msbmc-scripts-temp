@@ -401,9 +401,11 @@ if ($vbaudioDone) {
     if (Test-Path $vbaudioScript) {
         Write-Host "Installing VB-Audio Virtual Cable..." -ForegroundColor Yellow
         Write-Host "This will install audio routing driver for capture." -ForegroundColor Cyan
+        Write-Host "NOTE: Administrator elevation required for driver installation." -ForegroundColor Yellow
         Write-Host ""
         
-        & $vbaudioScript
+        # Run as Administrator (required for driver installation and scheduled task creation)
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$vbaudioScript`"" -Verb RunAs -Wait
         
         Write-Host ""
         Write-Host "Verifying installation..." -ForegroundColor Yellow
@@ -597,9 +599,10 @@ if ($watchdogDone) {
         Write-Host "Installing Chrome Watchdog..." -ForegroundColor Yellow
         Write-Host "This will create a background task to keep Chrome maximized." -ForegroundColor Cyan
         Write-Host "Task is DISABLED by default (enabled only in Chrome-only mode)." -ForegroundColor Cyan
+        Write-Host "NOTE: Administrator elevation required." -ForegroundColor Yellow
         Write-Host ""
         
-        & $watchdogScript
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$watchdogScript`"" -Verb RunAs -Wait
         
         Write-Host ""
         Write-Host "Verifying installation..." -ForegroundColor Yellow
@@ -656,9 +659,10 @@ if ($kioskDone) {
         Write-Host "Toggle behavior:" -ForegroundColor Yellow
         Write-Host "  Normal → Chrome-only:  Press ESC 3 times" -ForegroundColor White
         Write-Host "  Chrome-only → Normal:  Press ESC 3 times + enter 'msbmc2024'" -ForegroundColor White
+        Write-Host "NOTE: Administrator elevation required." -ForegroundColor Yellow
         Write-Host ""
         
-        & $kioskScript
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$kioskScript`"" -Verb RunAs -Wait
         
         Write-Host ""
         Write-Host "Verifying installation..." -ForegroundColor Yellow

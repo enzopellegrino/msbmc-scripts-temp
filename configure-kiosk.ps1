@@ -304,159 +304,21 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Pr
 Write-Host "   Created: $taskName (runs at logon)" -ForegroundColor Green
 
 # =============================================================================
-# STEP 4: Create Kiosk Guard Script (blocks Windows key + fullscreen Chrome)
+# STEP 4: Copy Kiosk Guard Script and create scheduled task
 # =============================================================================
-Write-Host "[4/4] Creating Kiosk Guard script and scheduled task..." -ForegroundColor Yellow
+Write-Host "[4/4] Setting up Kiosk Guard script and scheduled task..." -ForegroundColor Yellow
 
+$kioskGuardSource = "C:\MSBMC\Scripts\kiosk-guard.ps1"
 $kioskGuardPath = "C:\ProgramData\msbmc-kiosk-guard.ps1"
-$kioskGuardContent = @'
-# MSBMC Kiosk Guard - Blocks Windows key and maintains fullscreen Chrome
 
-Add-Type -AssemblyName System.Windows.Forms
-
-Add-Type @"
-using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-
-public class KioskGuard {
-    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-    
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-    
-    [DllImport("user32.dll")]
-    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-    
-    [DllImport("user32.dll")]
-    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-    
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GetModuleHandle(string lpModuleName);
-    
-    [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string className, string windowName);
-    
-    [DllImport("user32.dll")]
-    public static extern int ShowWindow(IntPtr hwnd, int command);
-    
-    [DllImport("user32.dll")]
-    public static extern bool EnableWindow(IntPtr hwnd, bool enable);
-    
-    [DllImport("user32.dll")]
-    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-    
-    [DllImport("user32.dll")]
-    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-    
-    [DllImport("user32.dll")]
-    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-    
-    [DllImport("user32.dll")]
-    public static extern bool SystemParametersInfo(int uiAction, int uiParam, ref RECT pvParam, int fWinIni);
-    
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT {
-        public int Left, Top, Right, Bottom;
-    }
-    
-    private const int WH_KEYBOARD_LL = 13;
-    private const int VK_LWIN = 0x5B;
-    private const int VK_RWIN = 0x5C;
-    
-    public const int SW_HIDE = 0;
-    public const int SW_SHOW = 5;
-    public const int GWL_STYLE = -16;
-    public const int WS_CAPTION = 0x00C00000;
-    public const int WS_THICKFRAME = 0x00040000;
-    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
-    public const uint SWP_SHOWWINDOW = 0x0040;
-    public const uint SWP_FRAMECHANGED = 0x0020;
-    public const int SPI_SETWORKAREA = 0x002F;
-    public const int SPIF_SENDCHANGE = 0x02;
-    
-    private static IntPtr _hookID = IntPtr.Zero;
-    private static LowLevelKeyboardProc _proc = HookCallback;
-    
-    private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
-        if (nCode >= 0) {
-            int vkCode = Marshal.ReadInt32(lParam);
-            if (vkCode == VK_LWIN || vkCode == VK_RWIN) {
-                return (IntPtr)1;
-            }
-        }
-        return CallNextHookEx(_hookID, nCode, wParam, lParam);
-    }
-    
-    public static void StartHook() {
-        using (Process curProcess = Process.GetCurrentProcess())
-        using (ProcessModule curModule = curProcess.MainModule) {
-            _hookID = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(curModule.ModuleName), 0);
-        }
-    }
-    
-    public static void StopHook() {
-        if (_hookID != IntPtr.Zero) {
-            UnhookWindowsHookEx(_hookID);
-            _hookID = IntPtr.Zero;
-        }
-    }
-    
-    public static void HideTaskbar() {
-        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
-        if (hwnd != IntPtr.Zero) { ShowWindow(hwnd, SW_HIDE); EnableWindow(hwnd, false); }
-        IntPtr hwnd2 = FindWindow("Shell_SecondaryTrayWnd", null);
-        if (hwnd2 != IntPtr.Zero) { ShowWindow(hwnd2, SW_HIDE); EnableWindow(hwnd2, false); }
-    }
-    
-    public static void ShowTaskbar() {
-        IntPtr hwnd = FindWindow("Shell_TrayWnd", null);
-        if (hwnd != IntPtr.Zero) { EnableWindow(hwnd, true); ShowWindow(hwnd, SW_SHOW); }
-    }
-    
-    public static void SetFullWorkArea(int w, int h) {
-        RECT r = new RECT(); r.Left = 0; r.Top = 0; r.Right = w; r.Bottom = h;
-        SystemParametersInfo(SPI_SETWORKAREA, 0, ref r, SPIF_SENDCHANGE);
-    }
-    
-    public static void MakeChromeFullscreen(IntPtr hwnd, int w, int h) {
-        if (hwnd == IntPtr.Zero) return;
-        int style = GetWindowLong(hwnd, GWL_STYLE);
-        SetWindowLong(hwnd, GWL_STYLE, style & ~WS_CAPTION & ~WS_THICKFRAME);
-        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, w, h, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-        SetForegroundWindow(hwnd);
-    }
-    
-    public static void MakeChromeNormal(IntPtr hwnd) {
-        if (hwnd == IntPtr.Zero) return;
-        SetWindowPos(hwnd, HWND_NOTOPMOST, 100, 100, 1600, 900, SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-    }
+if (Test-Path $kioskGuardSource) {
+    Copy-Item -Path $kioskGuardSource -Destination $kioskGuardPath -Force
+    Write-Host "   Copied: $kioskGuardSource -> $kioskGuardPath" -ForegroundColor Green
+} else {
+    Write-Host "   [ERROR] Kiosk Guard source not found: $kioskGuardSource" -ForegroundColor Red
+    Write-Host "   Please ensure kiosk-guard.ps1 exists in C:\MSBMC\Scripts\" -ForegroundColor Yellow
+    exit 1
 }
-"@
-
-function Is-ChromeOnlyMode { return (Test-Path "C:\ProgramData\msbmc-chrome-only.flag") }
-
-$sw = 1920
-$sh = 1080
-
-[KioskGuard]::StartHook()
-[KioskGuard]::SetFullWorkArea($sw, $sh)
-
-while ($true) {
-    if (Is-ChromeOnlyMode) {
-        [KioskGuard]::HideTaskbar()
-        $cp = Get-Process chrome -EA SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }
-        if ($cp) { [KioskGuard]::MakeChromeFullscreen($cp[0].MainWindowHandle, $sw, $sh) }
-    }
-    Start-Sleep -Seconds 2
-}
-'@
-$kioskGuardContent | Set-Content -Path $kioskGuardPath -Encoding UTF8 -Force
-Write-Host "   Created: $kioskGuardPath" -ForegroundColor Green
 
 # Create scheduled task for Kiosk Guard
 $kioskGuardTaskName = "MSBMC-KioskGuard"
